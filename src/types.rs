@@ -207,8 +207,6 @@ pub struct ZstdState {
     pub block_idx: u64,
     pub max_tag_len: u64,
     pub tag_len: u64,
-    pub tag_idx: u64,
-    pub is_tag_change: bool,
 }
 
 impl Default for ZstdState {
@@ -219,32 +217,26 @@ impl Default for ZstdState {
             block_idx: 0,
             max_tag_len: 0,
             tag_len: 0,
-            tag_idx: 0,
-            is_tag_change: false,
         }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct EncodedDataCursor {
+    /// the index for the next byte should be decoded
     pub byte_idx: u64,
+    /// the total size of encoded (src) bytes, constant in
+    /// the decoding process
     pub encoded_len: u64,
-    pub value_byte: u8,
-    pub reverse: bool,
-    pub reverse_idx: u64,
-    pub reverse_len: u64,
+    // pub reverse: bool,
+    // pub reverse_idx: u64,
+    // pub reverse_len: u64,
 }
 
 impl EncodedDataCursor {
     pub fn value_bits_le(&self) -> [u8; N_BITS_PER_BYTE] {
         value_bits_le(self.value_byte)
     }
-}
-
-
-#[derive(Clone, Debug, Default)]
-pub struct DecodedDataCursor {
-    pub decoded_len: u64,
 }
 
 /// Last FSE decoding state for decoding
@@ -512,10 +504,12 @@ pub struct ZstdDecodingState {
     pub encoded_data: EncodedDataCursor,
     /// Bitstream reader cursor
     pub bitstream_read_data: Option<BitstreamReadCursor>,
-    /// Data cursor on decompressed data
-    pub decoded_data: DecodedDataCursor,
+    /// decompressed data has been decoded
+    pub decoded_data: Vec<u8>,
     /// Fse decoding state transition data
-    pub fse_data: Option<FseDecodingRow>,
+    pub fse_data: Option<FseDecodingState>,
+    /// literal dicts
+    pub literal_data: Vec<u64>,
 }
 
 impl ZstdDecodingState {
@@ -527,9 +521,10 @@ impl ZstdDecodingState {
                 encoded_len: src_len as u64,
                 ..Default::default()
             },
-            decoded_data: DecodedDataCursor::default(),
-            fse_data: FseDecodingRow::default(),
-            bitstream_read_data: BitstreamReadCursor::default(),
+            decoded_data: Vec::new(),
+            fse_data: None,
+            bitstream_read_data: None,
+            literal_data: Vec::new(),
         }
     }
 }

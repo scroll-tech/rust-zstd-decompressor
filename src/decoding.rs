@@ -11,8 +11,11 @@ const CMOT_N: u64 = 31;
 /// FrameHeaderDescriptor and FrameContentSize
 fn process_frame_header(
     src: &[u8],
-    last_state: &ZstdDecodingState,
+    last_state: ZstdDecodingState,
 ) -> Result<(usize, ZstdDecodingState)> {
+    let byte_offset = last_state.encoded_data.byte_idx;
+    let src = &src[byte_offset..];
+
     let fhd_byte = src
         .get(0)
         .expect("FrameHeaderDescriptor byte should exist");
@@ -54,92 +57,31 @@ fn process_frame_header(
                 block_idx: 0,
                 max_tag_len: ZstdTag::FrameContentSize.max_len(),
                 tag_len: fcs_tag_len as u64,
-                tag_idx: (i + 1) as u64,
-                is_tag_change: i == 0,
             },
-            encoded_data: EncodedData {
-                byte_idx: (byte_offset + 2 + i) as u64,
-                encoded_len: last_row.encoded_data.encoded_len,
-                value_byte,
-                reverse: false,
-                reverse_idx: (fcs_tag_len - i) as u64,
-                reverse_len: fcs_tag_len as u64,
-                value_rlc: fhd_value_rlc,
+            encoded_data: EncodedDataCursor {
+                byte_idx: byte_offset + 1 + fcs_tag_len as u64,
+                encoded_len: last_state.encoded_data.encoded_len,
             },
-            decoded_data: DecodedData { decoded_len: fcs },            
+            decoded_data: last_state.decoded_data,
+            bitstream_read_data: None,
+            fse_data: None,
+            literal_data: Vec::new(),
         }
-    )
-
-    (
-        byte_offset + 1 + fcs_tag_len,
-        std::iter::once(ZstdWitnessRow {
-            state: ZstdState {
-                tag: ZstdTag::FrameHeaderDescriptor,
-                tag_next: ZstdTag::FrameContentSize,
-                max_tag_len: ZstdTag::FrameHeaderDescriptor.max_len(),
-                block_idx: 0,
-                tag_len: 1,
-                tag_idx: 1,
-                is_tag_change: true,
-                tag_rlc: Value::known(F::from(*fhd_byte as u64)),
-                tag_rlc_acc: Value::known(F::from(*fhd_byte as u64)),
-            },
-            encoded_data: EncodedData {
-                byte_idx: (byte_offset + 1) as u64,
-                encoded_len: last_row.encoded_data.encoded_len,
-                value_byte: *fhd_byte,
-                value_rlc: Value::known(F::zero()),
-                ..Default::default()
-            },
-            decoded_data: DecodedData { decoded_len: fcs },
-            bitstream_read_data: BitstreamReadRow::default(),
-            fse_data: FseDecodingRow::default(),
-        })
-        .chain(fcs_bytes.iter().zip(tag_rlc_iter.iter()).enumerate().map(
-            |(i, (&value_byte, &tag_rlc_acc))| ZstdWitnessRow {
-                state: ZstdState {
-                    tag: ZstdTag::FrameContentSize,
-                    tag_next: ZstdTag::BlockHeader,
-                    block_idx: 0,
-                    max_tag_len: ZstdTag::FrameContentSize.max_len(),
-                    tag_len: fcs_tag_len as u64,
-                    tag_idx: (i + 1) as u64,
-                    is_tag_change: i == 0,
-                    tag_rlc,
-                    tag_rlc_acc,
-                },
-                encoded_data: EncodedData {
-                    byte_idx: (byte_offset + 2 + i) as u64,
-                    encoded_len: last_row.encoded_data.encoded_len,
-                    value_byte,
-                    reverse: false,
-                    reverse_idx: (fcs_tag_len - i) as u64,
-                    reverse_len: fcs_tag_len as u64,
-                    value_rlc: fhd_value_rlc,
-                },
-                decoded_data: DecodedData { decoded_len: fcs },
-                bitstream_read_data: BitstreamReadRow::default(),
-                fse_data: FseDecodingRow::default(),
-            },
-        ))
-        .collect::<Vec<_>>(),
     )
 }
 
 #[derive(Debug, Clone)]
 pub struct AggregateBlockResult<F> {
-    pub offset: usize,
-    pub witness_rows: Vec<ZstdWitnessRow<F>>,
+    pub decoded_state: ZstdDecodingState,
     pub block_info: BlockInfo,
     pub sequence_info: SequenceInfo,
-    pub literal_bytes: Vec<u64>,
     pub fse_aux_tables: [FseAuxiliaryTableData; 3], // 3 sequence section FSE tables
     pub address_table_rows: Vec<AddressTableRow>,
     pub sequence_exec_result: SequenceExecResult,
     pub repeated_offset: [usize; 3], // repeated offsets are carried forward between blocks.
 }
 
-fn process_block<F: Field>(
+fn process_block(
     src: &[u8],
     decoded_bytes: &mut Vec<u8>,
     block_idx: u64,
@@ -196,23 +138,21 @@ fn process_block<F: Field>(
     }
 }
 
-fn process_block_header<F: Field>(
+fn process_block_header(
     src: &[u8],
     block_idx: u64,
-    byte_offset: usize,
-    last_row: &ZstdWitnessRow<F>,
-    randomness: Value<F>,
-) -> (usize, Vec<ZstdWitnessRow<F>>, BlockInfo) {
+    last_state: ZstdDecodingState,
+) -> Result<(ZstdDecodingState, BlockInfo)> {
+    let byte_offset = last_state.encoded_data.byte_idx;
+    let src = &src[byte_offset..];
+
     let mut block_info = BlockInfo {
         block_idx: block_idx as usize,
         ..Default::default()
     };
-    let bh_bytes = src
-        .iter()
-        .skip(byte_offset)
-        .take(N_BLOCK_HEADER_BYTES)
-        .cloned()
-        .collect::<Vec<u8>>();
+    assert!(src.len() >= N_BLOCK_HEADER_BYTES);
+    let bh_bytes = &src[..N_BLOCK_HEADER_BYTES];
+
     block_info.is_last_block = (bh_bytes[0] & 1) == 1;
     block_info.block_type = BlockType::from((bh_bytes[0] >> 1) & 3);
     block_info.block_len =
@@ -220,55 +160,30 @@ fn process_block_header<F: Field>(
 
     let tag_next = match block_info.block_type {
         BlockType::ZstdCompressedBlock => ZstdTag::ZstdBlockLiteralsHeader,
+        // TODO: we can support raw block / rle blow now
         _ => unreachable!("BlockType::ZstdCompressedBlock expected"),
     };
 
-    let tag_rlc_iter = bh_bytes
-        .iter()
-        .scan(Value::known(F::zero()), |acc, &byte| {
-            *acc = *acc * randomness + Value::known(F::from(byte as u64));
-            Some(*acc)
-        })
-        .collect::<Vec<Value<F>>>();
-    let tag_rlc = *(tag_rlc_iter.clone().last().expect("Tag RLC expected"));
-
-    let multiplier =
-        (0..last_row.state.tag_len).fold(Value::known(F::one()), |acc, _| acc * randomness);
-    let value_rlc = last_row.encoded_data.value_rlc * multiplier + last_row.state.tag_rlc;
-
-    (
-        byte_offset + N_BLOCK_HEADER_BYTES,
-        bh_bytes
-            .iter()
-            .zip(tag_rlc_iter.iter())
-            .enumerate()
-            .map(|(i, (&value_byte, tag_rlc_acc))| ZstdWitnessRow {
-                state: ZstdState {
-                    tag: ZstdTag::BlockHeader,
-                    tag_next,
-                    block_idx,
-                    max_tag_len: ZstdTag::BlockHeader.max_len(),
-                    tag_len: N_BLOCK_HEADER_BYTES as u64,
-                    tag_idx: (i + 1) as u64,
-                    is_tag_change: i == 0,
-                    tag_rlc,
-                    tag_rlc_acc: *tag_rlc_acc,
-                },
-                encoded_data: EncodedData {
-                    byte_idx: (byte_offset + i + 1) as u64,
-                    encoded_len: last_row.encoded_data.encoded_len,
-                    value_byte,
-                    reverse: false,
-                    value_rlc,
-                    ..Default::default()
-                },
-                bitstream_read_data: BitstreamReadRow::default(),
-                decoded_data: last_row.decoded_data.clone(),
-                fse_data: FseDecodingRow::default(),
-            })
-            .collect::<Vec<_>>(),
+    Ok((
+        ZstdDecodingState {
+            state: ZstdState {
+                tag: ZstdTag::BlockHeader,
+                tag_next,
+                block_idx,
+                max_tag_len: ZstdTag::BlockHeader.max_len(),
+                tag_len: N_BLOCK_HEADER_BYTES as u64,
+            },
+            encoded_data: EncodedDataCursor {
+                byte_idx: byte_offset + N_BLOCK_HEADER_BYTES as u64,
+                encoded_len: last_state.encoded_data.encoded_len,                
+            },
+            literal_data: Vec::new(),
+            bitstream_read_data: None,
+            decoded_data: last_state.decoded_data,
+            fse_data: None,
+        },
         block_info,
-    )
+    ))
 }
 
 #[derive(Debug, Default, Clone)]
@@ -278,7 +193,7 @@ pub struct SequenceExecResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockProcessingResult<F> {
+pub struct BlockProcessingResult {
     pub offset: usize,
     pub witness_rows: Vec<ZstdWitnessRow<F>>,
     pub literals: Vec<u64>,
@@ -298,17 +213,19 @@ pub struct LiteralsBlockResult<F> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn process_block_zstd<F: Field>(
+fn process_block_zstd(
     src: &[u8],
-    decoded_bytes: &mut Vec<u8>,
     block_idx: u64,
-    byte_offset: usize,
-    last_row: &ZstdWitnessRow<F>,
-    randomness: Value<F>,
+    last_state: ZstdDecodingState,
     block_size: usize,
     last_block: bool,
     repeated_offset: [usize; 3],
-) -> BlockProcessingResult<F> {
+) -> BlockProcessingResult {
+
+    let byte_offset = last_state.encoded_data.byte_idx;
+    let src = &src[byte_offset..];
+    let mut decoded_bytes = last_state.decoded_data;
+
     let expected_end_offset = byte_offset + block_size;
     let mut witness_rows = vec![];
 

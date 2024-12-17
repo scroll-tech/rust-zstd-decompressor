@@ -29,7 +29,7 @@ pub struct RomPredefinedFse {
 }
 
 
-/* /// Auxiliary data accompanying the FSE table's witness values.
+/// Auxiliary data accompanying the FSE table's witness values.
 #[derive(Clone, Debug)]
 pub struct FseAuxiliaryTableData {
     /// The block index in which this FSE table appears.
@@ -378,7 +378,7 @@ impl FseAuxiliaryTableData {
 
         state_table
     } 
-} */
+}
 
 #[cfg(test)]
 mod tests {
