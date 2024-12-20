@@ -1,7 +1,11 @@
 mod predefine;
 pub use crate::types::FseTableKind;
 
+use crate::params::*;
+use crate::util::{read_variable_bit_packing, smaller_powers_of_two};
+use bitstream_io::{BitRead, BitReader, LittleEndian};
 use std::{collections::BTreeMap, io::Cursor};
+use itertools::Itertools;
 
 pub trait Fse {
     /// Get the accuracy log of the FSE table.
@@ -28,6 +32,24 @@ pub struct RomPredefinedFse {
     pub nb: u64,
 }
 
+/// A single row in the FSE table.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FseTableRow {
+    /// The FSE state at this row in the FSE table.
+    pub state: u64,
+    /// The baseline associated with this state.
+    pub baseline: u64,
+    /// The number of bits to be read from the input bitstream at this state.
+    pub num_bits: u64,
+    /// The symbol emitted by the FSE table at this state.
+    pub symbol: u64,
+    /// During FSE table decoding, keep track of the number of symbol emitted
+    pub num_emitted: u64,
+    /// A boolean marker to indicate that as per the state transition rules of FSE codes, this
+    /// state was reached for this symbol, however it was already pre-allocated to a prior symbol,
+    /// this can happen in case we have symbols with prob=-1.
+    pub is_state_skipped: bool,
+}
 
 /// Auxiliary data accompanying the FSE table's witness values.
 #[derive(Clone, Debug)]
@@ -40,6 +62,8 @@ pub struct FseAuxiliaryTableData {
     pub table_kind: FseTableKind,
     /// The FSE table's size, i.e. 1 << AL (accuracy log).
     pub table_size: u64,
+    /// The accuracy log
+    pub accuracy_log: u64,
     /// Normalized probability,
     /// Used to indicate actual probability frequency of symbols, with 0 and -1 symbols present
     pub normalised_probs: BTreeMap<u64, i32>,
@@ -57,7 +81,7 @@ pub struct FseAuxiliaryTableData {
 /// This representation makes it easy to look up decoded symbol from current state.   
 /// Map<state, (symbol, baseline, num_bits)>.
 type FseStateMapping = BTreeMap<u64, (u64, u64, u64)>;
-type ReconstructedFse = (usize, Vec<(u32, u64, u64)>, FseAuxiliaryTableData);
+type ReconstructedFse = (usize, FseAuxiliaryTableData);
 
 impl FseAuxiliaryTableData {
     /// While we reconstruct an FSE table from a bitstream, we do not know before reconstruction
@@ -72,13 +96,11 @@ impl FseAuxiliaryTableData {
         src: &[u8],
         block_idx: u64,
         table_kind: FseTableKind,
-        byte_offset: usize,
         is_predefined: bool,
     ) -> std::io::Result<ReconstructedFse> {
         // construct little-endian bit-reader.
-        let data = src.iter().skip(byte_offset).cloned().collect::<Vec<u8>>();
+        let data = src.iter().cloned().collect::<Vec<u8>>();
         let mut reader = BitReader::endian(Cursor::new(&data), LittleEndian);
-        let mut bit_boundaries: Vec<(u32, u64, u64)> = vec![];
 
         ////////////////////////////////////////////////////////////////////////////////////////
         //////////////////////////// Parse Normalised Probabilities ////////////////////////////
@@ -118,7 +140,6 @@ impl FseAuxiliaryTableData {
         } else {
             offset += 4;
             let accuracy_log = reader.read::<u8>(offset)? + 5;
-            bit_boundaries.push((offset, accuracy_log as u64 - 5, accuracy_log as u64 - 5));
             let table_size = 1 << accuracy_log;
             let mut R = table_size;
             let mut symbol = 0;
@@ -129,7 +150,6 @@ impl FseAuxiliaryTableData {
                     read_variable_bit_packing(&data, offset, R + 1)?;
                 reader.skip(n_bits_read)?;
                 offset += n_bits_read;
-                bit_boundaries.push((offset, value_read, value_decoded));
 
                 // Number of states allocated to this symbol.
                 // - prob=-1 => 1
@@ -160,7 +180,6 @@ impl FseAuxiliaryTableData {
                     loop {
                         let repeat_bits = reader.read::<u8>(2)?;
                         offset += 2;
-                        bit_boundaries.push((offset, repeat_bits as u64, repeat_bits as u64));
 
                         for k in 0..repeat_bits {
                             normalised_probs.insert(symbol + (k as u64), 0);
@@ -196,12 +215,7 @@ impl FseAuxiliaryTableData {
         // read the trailing section
         if t * N_BITS_PER_BYTE > (offset as usize) {
             let bits_remaining = t * N_BITS_PER_BYTE - offset as usize;
-            let trailing_value = reader.read::<u8>(bits_remaining as u32)? as u64;
-            bit_boundaries.push((
-                offset + bits_remaining as u32,
-                trailing_value,
-                trailing_value,
-            ));
+            let _trailing_value = reader.read::<u8>(bits_remaining as u32)? as u64;
         }
 
         // sanity check: sum(probabilities) == table_size.
@@ -221,16 +235,12 @@ impl FseAuxiliaryTableData {
 
         Ok((
             t,
-            if is_predefined {
-                vec![]
-            } else {
-                bit_boundaries
-            },
             Self {
                 block_idx,
                 is_predefined,
                 table_kind,
                 table_size,
+                accuracy_log: accuracy_log as u64,
                 normalised_probs,
                 sym_to_states,
                 sym_to_sorted_states,
@@ -246,13 +256,14 @@ impl FseAuxiliaryTableData {
         BTreeMap<u64, Vec<FseTableRow>>,
         BTreeMap<u64, Vec<FseTableRow>>,
     ) {
+        // TODO: still need optimizations
         let table_size = 1 << accuracy_log;
 
         let mut sym_to_states = BTreeMap::new();
         let mut sym_to_sorted_states = BTreeMap::new();
         let mut state = 0;
         let mut retreating_state = table_size - 1;
-        let mut allocated_states = HashMap::<u64, bool>::new();
+        let mut allocated_states = BTreeMap::<u64, bool>::new();
 
         // We start with the symbols that have prob=-1.
         for (&symbol, _prob) in normalised_probs

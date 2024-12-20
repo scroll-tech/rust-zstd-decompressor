@@ -10,6 +10,8 @@ use super::{
     util::{read_variable_bit_packing, smaller_powers_of_two, value_bits_le},
 };
 
+pub use crate::fse::{FseAuxiliaryTableData, FseTableRow};
+
 #[derive(Debug, Default, Clone, Copy)]
 pub enum BlockType {
     #[default]
@@ -233,12 +235,6 @@ pub struct EncodedDataCursor {
     // pub reverse_len: u64,
 }
 
-impl EncodedDataCursor {
-    pub fn value_bits_le(&self) -> [u8; N_BITS_PER_BYTE] {
-        value_bits_le(self.value_byte)
-    }
-}
-
 /// Last FSE decoding state for decoding
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FseDecodingState {
@@ -263,24 +259,6 @@ pub struct FseDecodingState {
     pub is_trailing_bits: bool,
 }
 
-/// A single row in the FSE table.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct FseTableRow {
-    /// The FSE state at this row in the FSE table.
-    pub state: u64,
-    /// The baseline associated with this state.
-    pub baseline: u64,
-    /// The number of bits to be read from the input bitstream at this state.
-    pub num_bits: u64,
-    /// The symbol emitted by the FSE table at this state.
-    pub symbol: u64,
-    /// During FSE table decoding, keep track of the number of symbol emitted
-    pub num_emitted: u64,
-    /// A boolean marker to indicate that as per the state transition rules of FSE codes, this
-    /// state was reached for this symbol, however it was already pre-allocated to a prior symbol,
-    /// this can happen in case we have symbols with prob=-1.
-    pub is_state_skipped: bool,
-}
 
 // Used for tracking bit markers for non-byte-aligned bitstream decoding
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -510,6 +488,8 @@ pub struct ZstdDecodingState {
     pub fse_data: Option<FseDecodingState>,
     /// literal dicts
     pub literal_data: Vec<u64>,
+    /// the repeated offset for sequence
+    pub repeated_offset: [usize; 3],
 }
 
 impl ZstdDecodingState {
@@ -525,6 +505,7 @@ impl ZstdDecodingState {
             fse_data: None,
             bitstream_read_data: None,
             literal_data: Vec::new(),
+            repeated_offset: [1,4,8], // starting values, according to the spec
         }
     }
 }
