@@ -12,3 +12,7 @@ strum = "0.25"
 strum_macros = "0.25"
 anyhow = "1"
 log = "0.4"
+
+[dev-dependencies]
+hex = "0.4"
+zstd-encoder = { package = "encoder", git = "https://github.com/scroll-tech/da-codec.git", tag = "v0.1.2" }

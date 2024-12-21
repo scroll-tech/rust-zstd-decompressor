@@ -1049,7 +1049,7 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
             block_idx,
             last_state,
         )?;
-        let offset = last_state.encoded_data.byte_idx as usize;
+        let offset = block_state.encoded_data.byte_idx as usize;
         log::debug!("processed block={:?}: offset={:?}", block_idx, offset);
         block_idx += 1;
         last_state = block_state;
@@ -1069,7 +1069,27 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
 mod tests {
     use std::{fs, fs::File, io::Write};
 
-    use crate::witgen::init_zstd_encoder;
+    /// re-export constants in zstd-encoder
+    use zstd_encoder::N_BLOCK_SIZE_TARGET;
+
+    use zstd_encoder::{init_zstd_encoder as init_zstd_encoder_n, zstd};
+
+    /// Zstd encoder configuration
+    fn init_zstd_encoder(
+        target_block_size: Option<u32>,
+    ) -> zstd::stream::Encoder<'static, Vec<u8>> {
+        init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
+    }
+
+    /// Encode input bytes by using the default encoder.
+    fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = init_zstd_encoder(None);
+        encoder
+            .set_pledged_src_size(Some(bytes.len() as u64))
+            .expect("infallible");
+        encoder.write_all(bytes).expect("infallible");
+        encoder.finish().expect("infallible")
+    }
 
     // #[test]
     // #[ignore]
