@@ -90,6 +90,8 @@ fn process_block(
     let (last_state, block_info) =
         process_block_header(src, block_idx, last_state)?;
 
+    println!("offset after block header {} of block {}, block len {}", last_state.encoded_data.byte_idx, block_idx, block_info.block_len);
+
     let last_state = match block_info.block_type {
         BlockType::ZstdCompressedBlock => process_block_zstd(
             src,
@@ -180,18 +182,18 @@ fn process_block_zstd(
 ) -> Result<ZstdDecodingState> {
 
     let byte_offset = last_state.encoded_data.byte_idx as usize;
-    let src = &src[byte_offset..];
-
     let expected_end_offset = byte_offset + block_size;
 
     // 1-5 bytes LiteralSectionHeader
     let (last_state, regen_size) = process_block_zstd_literals_header(src, block_idx, last_state)?;
+    println!("offset after literal header {} of block {}, literal size {}", last_state.encoded_data.byte_idx, block_idx, regen_size);
 
     // Literal body
     let byte_offset = last_state.encoded_data.byte_idx as usize;
-    let src = &src[byte_offset..];
-
-    let literal_data = src[..regen_size].iter().map(|b|*b as u64).collect();
+    let literal_bytes = &src[byte_offset..];
+    
+    // TODO: optimize this vector
+    let literal_data = literal_bytes[..regen_size].iter().map(|b|*b as u64).collect();
 
     let last_state = ZstdDecodingState {
         state: ZstdState {
@@ -212,6 +214,7 @@ fn process_block_zstd(
         bitstream_read_data: None,  
     };
 
+    println!("offset after literal body {} of block {}", last_state.encoded_data.byte_idx, block_idx);
     // let LiteralsBlockResult {
     //     offset: byte_offset,
     //     witness_rows: rows,
@@ -329,7 +332,7 @@ fn process_sequences(
 ) -> Result<ZstdDecodingState> {
     let encoded_len = last_state.encoded_data.encoded_len;
     let byte_offset = last_state.encoded_data.byte_idx;
-    let src = &src[byte_offset as usize..];
+    let src = &src[byte_offset as usize..expected_seq_size];
 
     //////////////////////////////////////////////////////
     ///// Sequence Section Part 1: Sequence Header  //////
@@ -387,61 +390,38 @@ fn process_sequences(
 
     let is_all_predefined_fse = literal_lengths_mode + offsets_mode + match_lengths_mode < 1;
 
-    // Add witness rows for the sequence header
-    // let sequence_header_start_offset = byte_offset;
-    // let sequence_header_end_offset = byte_offset + num_sequence_header_bytes;
 
-    // let tag_rlc_iter = src[sequence_header_start_offset..sequence_header_end_offset]
-    //     .iter()
-    //     .scan(Value::known(F::zero()), |acc, &byte| {
-    //         *acc = *acc * randomness + Value::known(F::from(byte as u64));
-    //         Some(*acc)
-    //     });
-    // let tag_rlc = tag_rlc_iter.clone().last().expect("Tag RLC must exist");
-
-    // let header_rows = src[sequence_header_start_offset..sequence_header_end_offset]
-    //     .iter()
-    //     .zip(tag_rlc_iter)
-    //     .enumerate()
-    //     .map(|(i, (&value_byte, tag_rlc_acc))| ZstdWitnessRow {
-    //         state: ZstdState {
-    //             tag: ZstdTag::ZstdBlockSequenceHeader,
-    //             tag_next: if is_all_predefined_fse {
-    //                 ZstdTag::ZstdBlockSequenceData
-    //             } else {
-    //                 ZstdTag::ZstdBlockSequenceFseCode
-    //             },
-    //             block_idx,
-    //             max_tag_len: ZstdTag::ZstdBlockSequenceHeader.max_len(),
-    //             tag_len: num_sequence_header_bytes as u64,
-    //             tag_idx: (i + 1) as u64,
-    //             is_tag_change: i == 0,
-    //             tag_rlc,
-    //             tag_rlc_acc,
+    // let last_state = ZstdDecodingState {
+    //     state: ZstdState {
+    //         tag: ZstdTag::ZstdBlockSequenceData,
+    //         tag_next: if last_block {
+    //             ZstdTag::Null
+    //         } else {
+    //             ZstdTag::BlockHeader
     //         },
-    //         encoded_data: EncodedData {
-    //             byte_idx: (sequence_header_start_offset + i + 1) as u64,
-    //             encoded_len: last_row.encoded_data.encoded_len,
-    //             value_byte,
-    //             value_rlc,
-    //             reverse: false,
-    //             ..Default::default()
-    //         },
-    //         decoded_data: DecodedData {
-    //             decoded_len: last_row.decoded_data.decoded_len,
-    //         },
-    //         bitstream_read_data: BitstreamReadRow::default(),
-    //         fse_data: FseDecodingRow::default(),
-    //     })
-    //     .collect::<Vec<_>>();
-
-    // witness_rows.extend_from_slice(&header_rows);
+    //         block_idx,
+    //         max_tag_len: ZstdTag::ZstdBlockSequenceData.max_len(),
+    //         tag_len: n_sequence_data_bytes as u64,
+    //     },
+    //     encoded_data: EncodedDataCursor {
+    //         byte_idx: byte_offset + n_sequence_data_bytes as u64,
+    //         encoded_len: last_state.encoded_data.encoded_len,
+    //     },
+    //     bitstream_read_data: None,
+    //     decoded_data: last_state.decoded_data,
+    //     fse_data: None,
+    //     literal_data: last_state.literal_data,
+    //     repeated_offset: last_state.repeated_offset,
+    // };
 
     /////////////////////////////////////////////////
     ///// Sequence Section Part 2: FSE Tables  //////
     /////////////////////////////////////////////////
     // let byte_offset = sequence_header_end_offset;
     // let fse_starting_byte_offset = byte_offset;
+    println!("offset after seq header {} of block {}", byte_offset as usize + num_sequence_header_bytes, block_idx);
+
+    let byte_offset = byte_offset + num_sequence_header_bytes as u64;
     let src = &src[num_sequence_header_bytes..];
 
     // Literal Length Table (LLT)
@@ -536,7 +516,7 @@ fn process_sequences(
 
     // Decode sequence bitstream
     // TODO: too big for memory?
-    let sequence_bitstream = src[..expected_seq_size]
+    let sequence_bitstream = src
         .iter()
         .rev()
         .flat_map(|v| {
@@ -548,10 +528,11 @@ fn process_sequences(
 
     // Bitstream processing state values
     let _num_emitted: usize = 0;
-    let n_sequence_data_bytes = expected_seq_size;
+    let n_sequence_data_bytes = src.len();
     let mut last_byte_idx: usize = 1;
     let mut current_byte_idx: usize = 1;
     let mut current_bit_idx: usize = 0;
+    println!("bit stream size {}, n_seq_bytes {}, offset {}", sequence_bitstream.len(), n_sequence_data_bytes, byte_offset);
 
     let mut padding_end_idx = 0;
     while sequence_bitstream[padding_end_idx] == 0 {
@@ -924,6 +905,8 @@ fn process_sequences(
         decoded_bytes.extend(literals[r].iter().map(|&v| v as u8));
     }
 
+    println!("offset after seq body {} of block {}", byte_offset as usize + n_sequence_data_bytes, block_idx);
+
     Ok(ZstdDecodingState {
         state: ZstdState {
             tag: ZstdTag::ZstdBlockSequenceData,
@@ -1033,16 +1016,12 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
     // let mut sequence_exec_info_arr: Vec<SequenceExecResult> = vec![];
 
     // // FrameHeaderDescriptor and FrameContentSize
-    // let (mut byte_offset, rows) = process_frame_header::<F>(
-    //     src,
-    //     0, // frame header starts at offset=0
-    //     &ZstdWitnessRow::init(src.len()),
-    //     randomness,
-    // );
-    // witness_rows.extend_from_slice(&rows);
-
+    let (frame_content_size, mut last_state) = process_frame_header(
+        src,
+        ZstdDecodingState::init(src.len()),
+    )?;
+    println!("offset after frame header {} (fcs {})", last_state.encoded_data.byte_idx, frame_content_size);
     let mut block_idx: u64 = 1;
-    let mut last_state = ZstdDecodingState::init(src.len());
     loop {
         let (block_state, block_info) = process_block(
             src,
@@ -1051,7 +1030,6 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
         )?;
         let offset = block_state.encoded_data.byte_idx as usize;
         log::debug!("processed block={:?}: offset={:?}", block_idx, offset);
-        block_idx += 1;
         last_state = block_state;
 
         if block_info.is_last_block {
