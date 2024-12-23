@@ -87,10 +87,11 @@ fn process_block(
     last_state: ZstdDecodingState,
 ) -> Result<(ZstdDecodingState, BlockInfo)> {
 
-    let (last_state, block_info) =
+    let (mut last_state, block_info) =
         process_block_header(src, block_idx, last_state)?;
 
-    println!("offset after block header {} of block {}, block len {}", last_state.encoded_data.byte_idx, block_idx, block_info.block_len);
+    let byte_offset = last_state.encoded_data.byte_idx as usize;
+    println!("offset after block header {} of block {}, block len {}", byte_offset, block_idx, block_info.block_len);
 
     let last_state = match block_info.block_type {
         BlockType::ZstdCompressedBlock => process_block_zstd(
@@ -100,6 +101,29 @@ fn process_block(
             block_info.block_len,
             block_info.is_last_block,
         ),
+        BlockType::RawBlock => {
+            last_state.state.tag = ZstdTag::BlockContent;
+            last_state.state.tag_next = ZstdTag::BlockHeader;
+            last_state.state.tag_len = block_info.block_len as u64;
+            last_state.encoded_data.byte_idx += block_info.block_len as u64;
+
+            let src = &src[byte_offset..];
+            assert!(src.len()>= block_info.block_len);
+            last_state.decoded_data.extend_from_slice(&src[..block_info.block_len]);
+            Ok(last_state)
+        },
+        BlockType::RleBlock => {
+            last_state.state.tag = ZstdTag::BlockContent;
+            last_state.state.tag_next = ZstdTag::BlockHeader;
+            last_state.state.tag_len = 1;
+            last_state.encoded_data.byte_idx += 1;
+
+            let src = &src[byte_offset..];
+            assert!(src.len()>= 1);
+            let new_size = last_state.decoded_data.len() + block_info.block_len;
+            last_state.decoded_data.resize(new_size, src[0]);
+            Ok(last_state)
+        },        
         _ => unreachable!("BlockType::ZstdCompressedBlock expected"),
     }?;
 
@@ -129,6 +153,7 @@ fn process_block_header(
     let tag_next = match block_info.block_type {
         BlockType::ZstdCompressedBlock => ZstdTag::ZstdBlockLiteralsHeader,
         // TODO: we can support raw block / rle blow now
+        BlockType::RawBlock | BlockType::RleBlock => ZstdTag::BlockContent,
         _ => unreachable!("BlockType::ZstdCompressedBlock expected"),
     };
 
@@ -390,38 +415,36 @@ fn process_sequences(
 
     let is_all_predefined_fse = literal_lengths_mode + offsets_mode + match_lengths_mode < 1;
 
-
-    // let last_state = ZstdDecodingState {
-    //     state: ZstdState {
-    //         tag: ZstdTag::ZstdBlockSequenceData,
-    //         tag_next: if last_block {
-    //             ZstdTag::Null
-    //         } else {
-    //             ZstdTag::BlockHeader
-    //         },
-    //         block_idx,
-    //         max_tag_len: ZstdTag::ZstdBlockSequenceData.max_len(),
-    //         tag_len: n_sequence_data_bytes as u64,
-    //     },
-    //     encoded_data: EncodedDataCursor {
-    //         byte_idx: byte_offset + n_sequence_data_bytes as u64,
-    //         encoded_len: last_state.encoded_data.encoded_len,
-    //     },
-    //     bitstream_read_data: None,
-    //     decoded_data: last_state.decoded_data,
-    //     fse_data: None,
-    //     literal_data: last_state.literal_data,
-    //     repeated_offset: last_state.repeated_offset,
-    // };
+    let last_state = ZstdDecodingState {
+        state: ZstdState {
+            tag: ZstdTag::ZstdBlockSequenceHeader,
+            tag_next: if is_all_predefined_fse {
+                ZstdTag::ZstdBlockSequenceData
+            } else {
+                ZstdTag::ZstdBlockSequenceFseCode
+            },
+            block_idx,
+            max_tag_len: ZstdTag::ZstdBlockSequenceHeader.max_len(),
+            tag_len: num_sequence_header_bytes as u64,
+        },
+        encoded_data: EncodedDataCursor {
+            byte_idx: byte_offset + num_sequence_header_bytes as u64,
+            encoded_len: last_state.encoded_data.encoded_len,
+        },
+        bitstream_read_data: None,
+        decoded_data: last_state.decoded_data,
+        fse_data: None,
+        literal_data: last_state.literal_data,
+        repeated_offset: last_state.repeated_offset,
+    };
 
     /////////////////////////////////////////////////
     ///// Sequence Section Part 2: FSE Tables  //////
     /////////////////////////////////////////////////
     // let byte_offset = sequence_header_end_offset;
     // let fse_starting_byte_offset = byte_offset;
-    println!("offset after seq header {} of block {}", byte_offset as usize + num_sequence_header_bytes, block_idx);
-
-    let byte_offset = byte_offset + num_sequence_header_bytes as u64;
+    let byte_offset = last_state.encoded_data.byte_idx;
+    println!("offset after seq header {} of block {}", byte_offset, block_idx);
     let src = &src[num_sequence_header_bytes..];
 
     // Literal Length Table (LLT)

@@ -1,3 +1,5 @@
+
+use vm_zstd::process;
 fn main() {
-    println!("Hello, world!");
+    process(&[0,1,2,3]).ok();
 }

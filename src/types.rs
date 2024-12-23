@@ -102,6 +102,8 @@ pub enum ZstdTag {
     FrameContentSize,
     /// The block's header.
     BlockHeader,
+    /// The block's content (for raw / rle)
+    BlockContent,
     /// Zstd block's literals header.
     ZstdBlockLiteralsHeader,
     /// Zstd blocks might contain raw bytes.
@@ -122,6 +124,7 @@ impl ZstdTag {
             Self::FrameHeaderDescriptor => false,
             Self::FrameContentSize => false,
             Self::BlockHeader => false,
+            Self::BlockContent => true,
             Self::ZstdBlockLiteralsHeader => true,
             Self::ZstdBlockLiteralsRawBytes => true,
             Self::ZstdBlockSequenceHeader => true,
@@ -137,6 +140,7 @@ impl ZstdTag {
             Self::FrameHeaderDescriptor => false,
             Self::FrameContentSize => false,
             Self::BlockHeader => false,
+            Self::BlockContent => false,
             Self::ZstdBlockLiteralsHeader => false,
             Self::ZstdBlockLiteralsRawBytes => false,
             Self::ZstdBlockSequenceHeader => false,
@@ -152,6 +156,7 @@ impl ZstdTag {
             Self::FrameHeaderDescriptor => 1,
             Self::FrameContentSize => 8,
             Self::BlockHeader => 3,
+            Self::BlockContent => (1 << 8) - 1, // 128kB
             // as per spec, should be 5. But given that our encoder does not compress literals, it
             // is 3.
             Self::ZstdBlockLiteralsHeader => 3,
@@ -192,6 +197,7 @@ impl std::fmt::Display for ZstdTag {
                 Self::FrameHeaderDescriptor => "FrameHeaderDescriptor",
                 Self::FrameContentSize => "FrameContentSize",
                 Self::BlockHeader => "BlockHeader",
+                Self::BlockContent => "BlockContent",
                 Self::ZstdBlockLiteralsHeader => "ZstdBlockLiteralsHeader",
                 Self::ZstdBlockLiteralsRawBytes => "ZstdBlockLiteralsRawBytes",
                 Self::ZstdBlockSequenceHeader => "ZstdBlockSequenceHeader",
