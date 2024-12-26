@@ -1,5 +1,9 @@
 
 use vm_zstd::process;
+use openvm::io;
+
+openvm::entry!(main);
 fn main() {
-    process(&[0,1,2,3]).ok();
+    let data = io::read_vec();
+    process(&data).unwrap();
 }
