@@ -5,5 +5,6 @@ use openvm::io;
 openvm::entry!(main);
 fn main() {
     let data = io::read_vec();
+    println!("data len {}", data.len());
     process(&data).unwrap();
 }

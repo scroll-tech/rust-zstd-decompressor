@@ -55,6 +55,54 @@ fn calc_cycle(zstd_input: &[u8]) -> Result<()>{
     Ok(())
 }
 
+use std::io::Write;
+use zstd_encoder::N_BLOCK_SIZE_TARGET;
+use zstd_encoder::{init_zstd_encoder as init_zstd_encoder_n, zstd};
+
+/// Zstd encoder configuration
+fn init_zstd_encoder(
+    target_block_size: Option<u32>,
+) -> zstd::stream::Encoder<'static, Vec<u8>> {
+    init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
+}
+
+/// Encode input bytes by using the default encoder.
+fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
+    let mut encoder = init_zstd_encoder(None);
+    encoder
+        .set_pledged_src_size(Some(bytes.len() as u64))
+        .expect("infallible");
+    encoder.write_all(bytes).expect("infallible");
+    encoder.finish().expect("infallible")
+}
+
 fn main() {
-    calc_cycle(&[0, 1, 2, 3]).unwrap();
+
+    let mut batch_files = fs::read_dir("./data/test_batches").unwrap()
+    .map(|entry| entry.map(|e| e.path()))
+    .collect::<Result<Vec<_>, std::io::Error>>().unwrap();
+    batch_files.sort();
+
+    let batches = batch_files
+    .iter()
+    .take(1)
+    .map(fs::read_to_string)
+    .filter_map(|data| data.ok())
+    .map(|data| hex::decode(data.trim_end()).expect("Failed to decode hex data"))
+    .collect::<Vec<Vec<u8>>>();
+
+    for raw_input_bytes in batches.into_iter() {
+        let compressed = {
+            // compression level = 0 defaults to using level=3, which is zstd's default.
+            let mut encoder = init_zstd_encoder(None);
+
+            // set source length, which will be reflected in the frame header.
+            encoder.set_pledged_src_size(Some(raw_input_bytes.len() as u64)).unwrap();
+
+            encoder.write_all(&raw_input_bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+
+        calc_cycle(&compressed).unwrap();
+    }
 }
