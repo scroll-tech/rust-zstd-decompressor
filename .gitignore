@@ -1,2 +1,6 @@
 /target
 /data
+/elf
+/openvm
+/program/openvm
+/.cargo

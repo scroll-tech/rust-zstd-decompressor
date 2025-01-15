@@ -35,7 +35,7 @@ fn calc_cycle(zstd_input: &[u8]) -> Result<()>{
     // 2a. Build the ELF with guest options and a target filter (skipped, simply read elf).
 
 
-    let elf_bytes = fs::read("target/riscv32im-risc0-zkvm-elf/release/vm-zstd")?;
+    let elf_bytes = fs::read("target/riscv32im-risc0-zkvm-elf/release/zstd-decompressor")?;
     let elf = Elf::decode(&elf_bytes, MEM_SIZE as u32).map_err(|err|anyhow!("{err}"))?;    
     // ANCHOR_END: build
 

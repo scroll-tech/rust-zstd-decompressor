@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+
+members = [
+    "program",
+]
+
 [dependencies]
 bitstream-io = "2.2"
 itertools = "0.11"

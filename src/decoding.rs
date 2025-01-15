@@ -91,7 +91,7 @@ fn process_block(
         process_block_header(src, block_idx, last_state)?;
 
     let byte_offset = last_state.encoded_data.byte_idx as usize;
-    println!("offset after block header {} of block {}, block len {}", byte_offset, block_idx, block_info.block_len);
+    //println!("offset after block header {} of block {}, block len {}", byte_offset, block_idx, block_info.block_len);
 
     let last_state = match block_info.block_type {
         BlockType::ZstdCompressedBlock => process_block_zstd(
@@ -211,7 +211,7 @@ fn process_block_zstd(
 
     // 1-5 bytes LiteralSectionHeader
     let (last_state, regen_size) = process_block_zstd_literals_header(src, block_idx, last_state)?;
-    println!("offset after literal header {} of block {}, literal size {}", last_state.encoded_data.byte_idx, block_idx, regen_size);
+    //println!("offset after literal header {} of block {}, literal size {}", last_state.encoded_data.byte_idx, block_idx, regen_size);
 
     // Literal body
     let byte_offset = last_state.encoded_data.byte_idx as usize;
@@ -239,7 +239,7 @@ fn process_block_zstd(
         bitstream_read_data: None,  
     };
 
-    println!("offset after literal body {} of block {}", last_state.encoded_data.byte_idx, block_idx);
+    // println!("offset after literal body {} of block {}", last_state.encoded_data.byte_idx, block_idx);
     // let LiteralsBlockResult {
     //     offset: byte_offset,
     //     witness_rows: rows,
@@ -444,7 +444,7 @@ fn process_sequences(
     // let byte_offset = sequence_header_end_offset;
     // let fse_starting_byte_offset = byte_offset;
     let byte_offset = last_state.encoded_data.byte_idx;
-    println!("offset after seq header {} of block {}", byte_offset, block_idx);
+    //println!("offset after seq header {} of block {}", byte_offset, block_idx);
     let src = &src[num_sequence_header_bytes..];
 
     // Literal Length Table (LLT)
@@ -928,7 +928,7 @@ fn process_sequences(
         decoded_bytes.extend(literals[r].iter().map(|&v| v as u8));
     }
 
-    println!("offset after seq body {} of block {}", byte_offset as usize + n_sequence_data_bytes, block_idx);
+    //println!("offset after seq body {} of block {}", byte_offset as usize + n_sequence_data_bytes, block_idx);
 
     Ok(ZstdDecodingState {
         state: ZstdState {
@@ -1043,7 +1043,7 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
         src,
         ZstdDecodingState::init(src.len()),
     )?;
-    println!("offset after frame header {} (fcs {})", last_state.encoded_data.byte_idx, frame_content_size);
+    //println!("offset after frame header {} (fcs {})", last_state.encoded_data.byte_idx, frame_content_size);
     let mut block_idx: u64 = 1;
     loop {
         let (block_state, block_info) = process_block(
