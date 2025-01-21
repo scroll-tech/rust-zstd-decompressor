@@ -1,14 +1,5 @@
-use std::{collections::BTreeMap, io::Cursor};
 
-use bitstream_io::{BitRead, BitReader, LittleEndian};
-use itertools::Itertools;
-use std::collections::HashMap;
 use strum_macros::EnumIter;
-
-use super::{
-    params::N_BITS_PER_BYTE,
-    util::{read_variable_bit_packing, smaller_powers_of_two, value_bits_le},
-};
 
 pub use crate::fse::{FseAuxiliaryTableData, FseTableRow};
 

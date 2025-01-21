@@ -16,7 +16,7 @@ fn process_frame_header(
     let src = &src[byte_offset as usize..];
 
     let fhd_byte = src
-        .get(0)
+        .first()
         .expect("FrameHeaderDescriptor byte should exist");
     let value_bits = value_bits_le(*fhd_byte);
 
@@ -70,16 +70,6 @@ fn process_frame_header(
     ))
 }
 
-#[derive(Debug, Clone)]
-pub struct AggregateBlockResult {
-    pub decoded_state: ZstdDecodingState,
-    pub block_info: BlockInfo,
-    pub sequence_info: SequenceInfo,
-    pub fse_aux_tables: [FseAuxiliaryTableData; 3], // 3 sequence section FSE tables
-    pub address_table_rows: Vec<AddressTableRow>,
-    pub sequence_exec_result: SequenceExecResult,
-    pub repeated_offset: [usize; 3], // repeated offsets are carried forward between blocks.
-}
 
 fn process_block(
     src: &[u8],
@@ -119,7 +109,7 @@ fn process_block(
             last_state.encoded_data.byte_idx += 1;
 
             let src = &src[byte_offset..];
-            assert!(src.len()>= 1);
+            assert!(!src.is_empty());
             let new_size = last_state.decoded_data.len() + block_info.block_len;
             last_state.decoded_data.resize(new_size, src[0]);
             Ok(last_state)
@@ -178,23 +168,6 @@ fn process_block_header(
         },
         block_info,
     ))
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct SequenceExecResult {
-    pub exec_trace: Vec<SequenceExec>,
-    pub recovered_bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockProcessingResult {
-    pub sequence_info: SequenceInfo,
-    // pub fse_aux_tables: [FseAuxiliaryTableData; 3], // 3 sequence section FSE tables
-    // pub address_table_rows: Vec<AddressTableRow>,
-    // TODO: try to process sequence on the fly
-    pub sequence_exec_result: SequenceExecResult,
-    pub repeated_offset: [usize; 3], // repeated offsets are carried forward between blocks
-    pub regen_size: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -335,17 +308,6 @@ fn process_block_zstd(
 
 }
 
-#[derive(Debug, Clone)]
-pub struct SequencesProcessingResult {
-    pub offset: usize,
-//    pub witness_rows: Vec<ZstdWitnessRow<F>>,
-    pub fse_aux_tables: [FseAuxiliaryTableData; 3], // LLT, MLT, CMOT
-    pub address_table_rows: Vec<AddressTableRow>,   // Parsed sequence instructions
-    pub original_bytes: Vec<u8>,                    // Recovered original input
-    pub sequence_info: SequenceInfo,
-    pub sequence_exec: Vec<SequenceExec>,
-    pub repeated_offset: [usize; 3],
-}
 
 #[allow(clippy::too_many_arguments)]
 fn process_sequences(
@@ -355,7 +317,7 @@ fn process_sequences(
     last_state: ZstdDecodingState,
     last_block: bool,
 ) -> Result<ZstdDecodingState> {
-    let encoded_len = last_state.encoded_data.encoded_len;
+    let _encoded_len = last_state.encoded_data.encoded_len;
     let byte_offset = last_state.encoded_data.byte_idx;
     let src = &src[byte_offset as usize..expected_seq_size];
 
@@ -363,11 +325,11 @@ fn process_sequences(
     ///// Sequence Section Part 1: Sequence Header  //////
     //////////////////////////////////////////////////////
 
-    assert!(src.len() >= 1, "First byte of sequence header must exist.");
+    assert!(!src.is_empty(), "First byte of sequence header must exist.");
     let byte0 = src[0];
     assert!(byte0 > 0u8, "Sequences can't be of 0 length");
 
-    let (num_of_sequences, num_sequence_header_bytes) = if byte0 < 128 {
+    let (_num_of_sequences, num_sequence_header_bytes) = if byte0 < 128 {
         (byte0 as u64, 2usize)
     } else {
         assert!(src.len() >= 2, "Next byte of sequence header must exist.");
@@ -407,7 +369,7 @@ fn process_sequences(
         match_lengths_mode == 2 || match_lengths_mode == 0,
         "Only FSE_Compressed_Mode or Predefined are allowed"
     );
-    let compression_mode = [
+    let _compression_mode = [
         literal_lengths_mode > 0,
         offsets_mode > 0,
         match_lengths_mode > 0,
@@ -600,7 +562,6 @@ fn process_sequences(
     // Now the actual data-bearing bitstream starts
     // The sequence bitstream is interleaved by 6 bit processing strands.
     // The interleaving order is: CMOVBits, MLVBits, LLVBits, LLFBits, MLFBits, CMOFBits
-    let mut seq_idx: usize = 0;
     let mut decoded_bitstring_values: Vec<(SequenceDataTag, u64)> = vec![];
     let mut raw_sequence_instructions: Vec<(usize, usize, usize)> = vec![]; // offset_state, match_length, literal_length
     let mut curr_instruction: [usize; 3] = [0, 0, 0];
@@ -629,9 +590,8 @@ fn process_sequences(
 
     let mut is_init = true;
     let mut nb = nb_switch[mode][order_idx];
-    let bitstream_end_bit_idx = n_sequence_data_bytes as usize * N_BITS_PER_BYTE;
+    let bitstream_end_bit_idx = n_sequence_data_bytes * N_BITS_PER_BYTE;
     let mut table_kind;
-    let mut table_size;
     let mut last_states: [u64; 3] = [0, 0, 0];
     let mut last_symbols: [u64; 3] = [0, 0, 0];
     let mut current_decoding_state;
@@ -648,10 +608,6 @@ fn process_sequences(
                 order_idx = [0, 2, 1][order_idx];
             }
 
-            if order_idx < 1 {
-                seq_idx += 1;
-            }
-
             let new_decoded = (data_tags[mode * 3 + order_idx], bitstring_value);
             decoded_bitstring_values.push(new_decoded);
 
@@ -666,17 +622,6 @@ fn process_sequences(
                 }
                 SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
                     table_llt.table_kind as u64
-                }
-            };
-            table_size = match new_decoded.0 {
-                SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
-                    table_cmot.table_size
-                }
-                SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
-                    table_mlt.table_size
-                }
-                SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
-                    table_llt.table_size
                 }
             };
 
@@ -726,17 +671,6 @@ fn process_sequences(
                     table_llt.table_kind as u64
                 }
             };
-            table_size = match new_decoded.0 {
-                SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
-                    table_cmot.table_size
-                }
-                SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
-                    table_mlt.table_size
-                }
-                SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
-                    table_llt.table_size
-                }
-            };
 
             // Value decoding step
             curr_baseline = decoding_baselines[order_idx];
@@ -772,7 +706,7 @@ fn process_sequences(
                 }
                 skipped_bits += N_BITS_PER_BYTE;
 
-                let wrap_by = match to_bit_idx {
+                match to_bit_idx {
                     15 => 8,
                     16..=23 => 16,
                     v => unreachable!(
@@ -842,16 +776,13 @@ fn process_sequences(
     }
 
     // Process raw sequence instructions and execute to acquire the original input
-    let mut literal_len_acc: usize = 0;
-
-    let mut seq_exec_info: Vec<SequenceExec> = vec![];
     let mut current_literal_pos: usize = 0;
 
     let literals = &last_state.literal_data;
     let mut decoded_bytes = last_state.decoded_data;
     let mut repeated_offset = last_state.repeated_offset;
 
-    for (idx, inst) in raw_sequence_instructions.iter().enumerate() {
+    for inst in raw_sequence_instructions.iter() {
         let actual_offset = if inst.0 > 3 {
             inst.0 - 3
         } else {
@@ -867,8 +798,7 @@ fn process_sequences(
             }
         };
 
-        literal_len_acc += inst.2;
-        let &(cooked_match_offset, match_length, literal_length) = inst;
+        let &(_cooked_match_offset, match_length, literal_length) = inst;
 
         let new_literal_pos = current_literal_pos + literal_length;
         if new_literal_pos > current_literal_pos {
@@ -878,12 +808,12 @@ fn process_sequences(
 
         let match_pos = decoded_bytes.len() - actual_offset;
         if match_length > 0 {
-            let r = match_pos..(match_length as usize + match_pos);
+            let r = match_pos..(match_length + match_pos);
             // TODO: optimize this vec?
             let matched_and_repeated_bytes = if match_length <= actual_offset {
                 Vec::from(&decoded_bytes[r])
             } else {
-                let l = match_length as usize;
+                let l = match_length;
                 let r_prime = match_pos..decoded_bytes.len();
                 let matched_bytes = Vec::from(&decoded_bytes[r_prime]);
                 matched_bytes.iter().cycle().take(l).copied().collect()
@@ -950,7 +880,7 @@ fn process_sequences(
         decoded_data: decoded_bytes,
         fse_data: None,
         literal_data: Vec::new(),
-        repeated_offset: repeated_offset,
+        repeated_offset,
     })
 
 }
@@ -1015,7 +945,7 @@ fn process_block_zstd_literals_header(
 
 }
 
-/// Result for processing multiple blocks from compressed data
+// Result for processing multiple blocks from compressed data
 // #[derive(Debug, Clone)]
 // pub struct MultiBlockProcessResult<F> {
 //     pub witness_rows: Vec<ZstdWitnessRow<F>>,
@@ -1039,7 +969,7 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
     // let mut sequence_exec_info_arr: Vec<SequenceExecResult> = vec![];
 
     // // FrameHeaderDescriptor and FrameContentSize
-    let (frame_content_size, mut last_state) = process_frame_header(
+    let (_frame_content_size, mut last_state) = process_frame_header(
         src,
         ZstdDecodingState::init(src.len()),
     )?;
@@ -1052,7 +982,7 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
             last_state,
         )?;
         let offset = block_state.encoded_data.byte_idx as usize;
-        log::debug!("processed block={:?}: offset={:?}", block_idx, offset);
+        //log::debug!("processed block={:?}: offset={:?}", block_idx, offset);
         last_state = block_state;
 
         if block_info.is_last_block {
@@ -1068,7 +998,7 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, fs::File, io::Write};
+    use std::{fs, io::Write};
 
     /// re-export constants in zstd-encoder
     use zstd_encoder::N_BLOCK_SIZE_TARGET;
@@ -1080,16 +1010,6 @@ mod tests {
         target_block_size: Option<u32>,
     ) -> zstd::stream::Encoder<'static, Vec<u8>> {
         init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
-    }
-
-    /// Encode input bytes by using the default encoder.
-    fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = init_zstd_encoder(None);
-        encoder
-            .set_pledged_src_size(Some(bytes.len() as u64))
-            .expect("infallible");
-        encoder.write_all(bytes).expect("infallible");
-        encoder.finish().expect("infallible")
     }
 
     // #[test]

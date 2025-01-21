@@ -1,4 +1,3 @@
-mod predefine;
 pub use crate::types::FseTableKind;
 
 use crate::params::*;
@@ -6,31 +5,6 @@ use crate::util::{read_variable_bit_packing, smaller_powers_of_two};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
 use std::{collections::BTreeMap, io::Cursor};
 use itertools::Itertools;
-
-pub trait Fse {
-    /// Get the accuracy log of the FSE table.
-    fn accuracy_log(&self) -> u8;
-    /// Get the number of states in the FSE table.
-    fn table_size(&self) -> u64 {
-        1 << self.accuracy_log()
-    }
-    /// Get the symbol in the FSE table for the given state.
-    fn symbol(&self, state: u64) -> u64;
-    /// Get the baseline in the FSE table for the given state.
-    fn baseline(&self, state: u64) -> u64;
-    /// Get the number of bits (nb) to read from bitstream in the FSE table for the given state.
-    fn nb(&self, state: u64) -> u64;
-}
-
-
-pub struct RomPredefinedFse {
-    pub table_kind: FseTableKind,
-    pub table_size: u64,
-    pub state: u64,
-    pub symbol: u64,
-    pub baseline: u64,
-    pub nb: u64,
-}
 
 /// A single row in the FSE table.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -99,7 +73,7 @@ impl FseAuxiliaryTableData {
         is_predefined: bool,
     ) -> std::io::Result<ReconstructedFse> {
         // construct little-endian bit-reader.
-        let data = src.iter().cloned().collect::<Vec<u8>>();
+        let data = src.to_vec();
         let mut reader = BitReader::endian(Cursor::new(&data), LittleEndian);
 
         ////////////////////////////////////////////////////////////////////////////////////////
@@ -144,9 +118,12 @@ impl FseAuxiliaryTableData {
             let mut R = table_size;
             let mut symbol = 0;
             while R > 0 {
+                // TODO: invalid data (like 0xFF 0xFF 0xFF) would cause an infinity
+                // loop, can we detect that and throw error?
+
                 // number of bits and value read from the variable bit-packed data.
                 // And update the total number of bits read so far.
-                let (n_bits_read, value_read, value_decoded) =
+                let (n_bits_read, _value_read, value_decoded) =
                     read_variable_bit_packing(&data, offset, R + 1)?;
                 reader.skip(n_bits_read)?;
                 offset += n_bits_read;
@@ -395,48 +372,47 @@ impl FseAuxiliaryTableData {
 mod tests {
 
     use super::*;
-    use crate::fse::Fse;
+    //use crate::fse::Fse;
 
-    // #[test]
-    // fn test_fse_reconstruction() -> std::io::Result<()> {
-    //     // The first 3 bytes are garbage data and the offset == 3 passed to the function should
-    //     // appropriately ignore those bytes. Only the next 4 bytes are meaningful and the FSE
-    //     // reconstruction should read bitstreams only until the end of the 4th byte. The 3
-    //     // other bytes are garbage (for the purpose of this test case), and we want to make
-    //     // sure FSE reconstruction ignores them.
-    //     let src = vec![0xff, 0xff, 0xff, 0x30, 0x6f, 0x9b, 0x03, 0xff, 0xff, 0xff];
+    #[test]
+    fn test_fse_reconstruction() -> std::io::Result<()> {
+        // Only the first 4 bytes are meaningful and the FSE
+        // reconstruction should read bitstreams only until the end of the 4th byte. The 3
+        // other bytes are garbage (for the purpose of this test case), and we want to make
+        // sure FSE reconstruction ignores them.
+        let src = vec![0x30, 0x6f, 0x9b, 0x03, 0xff, 0xff, 0xff];
 
-    //     let (n_bytes, _bit_boundaries, table) =
-    //         FseAuxiliaryTableData::reconstruct(&src, 1, FseTableKind::LLT, 3, false)?;
+        let (n_bytes, table) =
+            FseAuxiliaryTableData::reconstruct(&src, 1, FseTableKind::LLT, false)?;
 
-    //     // TODO: assert equality for the entire table.
-    //     // for now only comparing state/baseline/nb for S1, i.e. weight == 1.
+        // TODO: assert equality for the entire table.
+        // for now only comparing state/baseline/nb for S1, i.e. weight == 1.
 
-    //     assert_eq!(n_bytes, 4);
-    //     assert_eq!(
-    //         table.sym_to_sorted_states.get(&1).cloned().unwrap(),
-    //         [
-    //             (0x03, 0x10, 3),
-    //             (0x0c, 0x18, 3),
-    //             (0x11, 0x00, 2),
-    //             (0x15, 0x04, 2),
-    //             (0x1a, 0x08, 2),
-    //             (0x1e, 0x0c, 2),
-    //         ]
-    //         .iter()
-    //         .map(|&(state, baseline, num_bits)| FseTableRow {
-    //             state,
-    //             symbol: 1,
-    //             baseline,
-    //             num_bits,
-    //             num_emitted: 0,
-    //             is_state_skipped: false,
-    //         })
-    //         .collect::<Vec<FseTableRow>>(),
-    //     );
+        assert_eq!(n_bytes, 4);
+        assert_eq!(
+            table.sym_to_sorted_states.get(&1).cloned().unwrap(),
+            [
+                (0x03, 0x10, 3),
+                (0x0c, 0x18, 3),
+                (0x11, 0x00, 2),
+                (0x15, 0x04, 2),
+                (0x1a, 0x08, 2),
+                (0x1e, 0x0c, 2),
+            ]
+            .iter()
+            .map(|&(state, baseline, num_bits)| FseTableRow {
+                state,
+                symbol: 1,
+                baseline,
+                num_bits,
+                num_emitted: 0,
+                is_state_skipped: false,
+            })
+            .collect::<Vec<FseTableRow>>(),
+        );
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     // #[test]
     // fn test_fse_reconstruction_predefined_tables() {
@@ -503,91 +479,91 @@ mod tests {
     //     }
     // }
 
-    // #[test]
-    // fn test_sequences_fse_reconstruction() -> std::io::Result<()> {
-    //     let src = vec![
-    //         0x21, 0x9d, 0x51, 0xcc, 0x18, 0x42, 0x44, 0x81, 0x8c, 0x94, 0xb4, 0x50, 0x1e,
-    //     ];
+    #[test]
+    fn test_sequences_fse_reconstruction() -> std::io::Result<()> {
+        let src = vec![
+            0x21, 0x9d, 0x51, 0xcc, 0x18, 0x42, 0x44, 0x81, 0x8c, 0x94, 0xb4, 0x50, 0x1e,
+        ];
 
-    //     let (_n_bytes, _bit_boundaries, table) =
-    //         FseAuxiliaryTableData::reconstruct(&src, 0, FseTableKind::LLT, 0, false)?;
-    //     let parsed_state_map = table.parse_state_table();
+        let (_n_bytes, table) =
+            FseAuxiliaryTableData::reconstruct(&src, 0, FseTableKind::LLT, false)?;
+        let parsed_state_map = table.parse_state_table();
 
-    //     let mut expected_state_table = BTreeMap::new();
+        let mut expected_state_table = BTreeMap::new();
 
-    //     let expected_state_table_states: [[u64; 4]; 64] = [
-    //         [0, 0, 4, 2],
-    //         [1, 0, 8, 2],
-    //         [2, 0, 12, 2],
-    //         [3, 0, 16, 2],
-    //         [4, 0, 20, 2],
-    //         [5, 0, 24, 2],
-    //         [6, 1, 32, 4],
-    //         [7, 1, 48, 4],
-    //         [8, 2, 0, 5],
-    //         [9, 3, 0, 4],
-    //         [10, 4, 16, 4],
-    //         [11, 4, 32, 4],
-    //         [12, 6, 0, 5],
-    //         [13, 8, 32, 5],
-    //         [14, 9, 32, 5],
-    //         [15, 10, 32, 5],
-    //         [16, 12, 0, 6],
-    //         [17, 14, 0, 6],
-    //         [18, 15, 0, 4],
-    //         [19, 17, 0, 6],
-    //         [20, 20, 0, 6],
-    //         [21, 24, 32, 5],
-    //         [22, 0, 28, 2],
-    //         [23, 0, 32, 2],
-    //         [24, 0, 36, 2],
-    //         [25, 0, 40, 2],
-    //         [26, 0, 44, 2],
-    //         [27, 1, 0, 3],
-    //         [28, 1, 8, 3],
-    //         [29, 2, 32, 5],
-    //         [30, 3, 16, 4],
-    //         [31, 4, 48, 4],
-    //         [32, 4, 0, 3],
-    //         [33, 5, 0, 5],
-    //         [34, 7, 0, 6],
-    //         [35, 8, 0, 4],
-    //         [36, 9, 0, 4],
-    //         [37, 10, 0, 4],
-    //         [38, 13, 0, 5],
-    //         [39, 15, 16, 4],
-    //         [40, 16, 0, 6],
-    //         [41, 18, 0, 5],
-    //         [42, 24, 0, 4],
-    //         [43, 0, 48, 2],
-    //         [44, 0, 52, 2],
-    //         [45, 0, 56, 2],
-    //         [46, 0, 60, 2],
-    //         [47, 0, 0, 1],
-    //         [48, 0, 2, 1],
-    //         [49, 1, 16, 3],
-    //         [50, 1, 24, 3],
-    //         [51, 3, 32, 4],
-    //         [52, 3, 48, 4],
-    //         [53, 4, 8, 3],
-    //         [54, 5, 32, 5],
-    //         [55, 6, 32, 5],
-    //         [56, 8, 16, 4],
-    //         [57, 9, 16, 4],
-    //         [58, 10, 16, 4],
-    //         [59, 13, 32, 5],
-    //         [60, 15, 32, 4],
-    //         [61, 15, 48, 4],
-    //         [62, 18, 32, 5],
-    //         [63, 24, 16, 4],
-    //     ];
+        let expected_state_table_states: [[u64; 4]; 64] = [
+            [0, 0, 4, 2],
+            [1, 0, 8, 2],
+            [2, 0, 12, 2],
+            [3, 0, 16, 2],
+            [4, 0, 20, 2],
+            [5, 0, 24, 2],
+            [6, 1, 32, 4],
+            [7, 1, 48, 4],
+            [8, 2, 0, 5],
+            [9, 3, 0, 4],
+            [10, 4, 16, 4],
+            [11, 4, 32, 4],
+            [12, 6, 0, 5],
+            [13, 8, 32, 5],
+            [14, 9, 32, 5],
+            [15, 10, 32, 5],
+            [16, 12, 0, 6],
+            [17, 14, 0, 6],
+            [18, 15, 0, 4],
+            [19, 17, 0, 6],
+            [20, 20, 0, 6],
+            [21, 24, 32, 5],
+            [22, 0, 28, 2],
+            [23, 0, 32, 2],
+            [24, 0, 36, 2],
+            [25, 0, 40, 2],
+            [26, 0, 44, 2],
+            [27, 1, 0, 3],
+            [28, 1, 8, 3],
+            [29, 2, 32, 5],
+            [30, 3, 16, 4],
+            [31, 4, 48, 4],
+            [32, 4, 0, 3],
+            [33, 5, 0, 5],
+            [34, 7, 0, 6],
+            [35, 8, 0, 4],
+            [36, 9, 0, 4],
+            [37, 10, 0, 4],
+            [38, 13, 0, 5],
+            [39, 15, 16, 4],
+            [40, 16, 0, 6],
+            [41, 18, 0, 5],
+            [42, 24, 0, 4],
+            [43, 0, 48, 2],
+            [44, 0, 52, 2],
+            [45, 0, 56, 2],
+            [46, 0, 60, 2],
+            [47, 0, 0, 1],
+            [48, 0, 2, 1],
+            [49, 1, 16, 3],
+            [50, 1, 24, 3],
+            [51, 3, 32, 4],
+            [52, 3, 48, 4],
+            [53, 4, 8, 3],
+            [54, 5, 32, 5],
+            [55, 6, 32, 5],
+            [56, 8, 16, 4],
+            [57, 9, 16, 4],
+            [58, 10, 16, 4],
+            [59, 13, 32, 5],
+            [60, 15, 32, 4],
+            [61, 15, 48, 4],
+            [62, 18, 32, 5],
+            [63, 24, 16, 4],
+        ];
 
-    //     for state in expected_state_table_states {
-    //         expected_state_table.insert(state[0], (state[1], state[2], state[3]));
-    //     }
+        for state in expected_state_table_states {
+            expected_state_table.insert(state[0], (state[1], state[2], state[3]));
+        }
 
-    //     assert!(parsed_state_map == expected_state_table);
+        assert!(parsed_state_map == expected_state_table);
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }

@@ -4461,7 +4461,6 @@ dependencies = [
  "encoder",
  "hex",
  "itertools 0.11.0",
- "log",
  "openvm",
  "openvm-sdk",
  "openvm-transpiler",

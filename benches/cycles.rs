@@ -1,7 +1,6 @@
-use vm_zstd::process;
+
 use openvm_sdk::{
-    config::{AggConfig, AppConfig, SdkVmConfig},
-    prover::AppProver,
+    config::SdkVmConfig,
     Sdk, StdIn,
 };
 use openvm::platform::memory::MEM_SIZE;
@@ -64,16 +63,6 @@ fn init_zstd_encoder(
     target_block_size: Option<u32>,
 ) -> zstd::stream::Encoder<'static, Vec<u8>> {
     init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
-}
-
-/// Encode input bytes by using the default encoder.
-fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
-    let mut encoder = init_zstd_encoder(None);
-    encoder
-        .set_pledged_src_size(Some(bytes.len() as u64))
-        .expect("infallible");
-    encoder.write_all(bytes).expect("infallible");
-    encoder.finish().expect("infallible")
 }
 
 fn main() {
