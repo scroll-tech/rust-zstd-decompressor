@@ -511,12 +511,6 @@ fn process_sequences(
     let mut last_byte_idx: usize = 1;
     let mut current_byte_idx: usize = 1;
     let mut current_bit_idx: usize = 0;
-    println!(
-        "bit stream size {}, n_seq_bytes {}, offset {}",
-        sequence_bitstream.len(),
-        n_sequence_data_bytes,
-        byte_offset
-    );
 
     let mut padding_end_idx = 0;
     while sequence_bitstream[padding_end_idx] == 0 {
