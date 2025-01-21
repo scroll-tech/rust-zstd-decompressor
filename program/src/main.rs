@@ -1,6 +1,5 @@
-
-use vm_zstd::process;
 use openvm::io;
+use vm_zstd::process;
 
 openvm::entry!(main);
 fn main() {

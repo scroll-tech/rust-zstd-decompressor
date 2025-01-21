@@ -1,5 +1,5 @@
-pub mod types;
 pub mod params;
+pub mod types;
 
 pub(crate) mod fse;
 pub(crate) mod util;

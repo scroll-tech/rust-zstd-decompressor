@@ -1,4 +1,3 @@
-
 use strum_macros::EnumIter;
 
 pub use crate::fse::{FseAuxiliaryTableData, FseTableRow};
@@ -81,7 +80,6 @@ impl From<usize> for LstreamNum {
     }
 }
 
-
 /// Various tags that we can decode from a zstd encoded data.
 #[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, Hash)]
 pub enum ZstdTag {
@@ -158,7 +156,6 @@ impl ZstdTag {
         }
     }
 }
-
 
 impl From<ZstdTag> for usize {
     fn from(value: ZstdTag) -> Self {
@@ -255,7 +252,6 @@ pub struct FseDecodingState {
     /// Whether this row represents the 0-7 trailing bits that should be ignored.
     pub is_trailing_bits: bool,
 }
-
 
 // Used for tracking bit markers for non-byte-aligned bitstream decoding
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -469,7 +465,6 @@ impl SequenceFixedStateActionTable {
     }
 }
 
-
 #[derive(Clone, Debug)]
 /// Current state for decompression
 pub struct ZstdDecodingState {
@@ -502,7 +497,7 @@ impl ZstdDecodingState {
             fse_data: None,
             bitstream_read_data: None,
             literal_data: Vec::new(),
-            repeated_offset: [1,4,8], // starting values, according to the spec
+            repeated_offset: [1, 4, 8], // starting values, according to the spec
         }
     }
 }

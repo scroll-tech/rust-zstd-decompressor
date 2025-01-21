@@ -3,8 +3,8 @@ pub use crate::types::FseTableKind;
 use crate::params::*;
 use crate::util::{read_variable_bit_packing, smaller_powers_of_two};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
-use std::{collections::BTreeMap, io::Cursor};
 use itertools::Itertools;
+use std::{collections::BTreeMap, io::Cursor};
 
 /// A single row in the FSE table.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -365,7 +365,7 @@ impl FseAuxiliaryTableData {
         }
 
         state_table
-    } 
+    }
 }
 
 #[cfg(test)]

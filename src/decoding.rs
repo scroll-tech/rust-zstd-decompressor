@@ -1,4 +1,3 @@
-
 use crate::params::*;
 use crate::types::*;
 use crate::util::{be_bits_to_value, increment_idx, le_bits_to_value, value_bits_le};
@@ -39,7 +38,9 @@ fn process_frame_header(
     let src = &src[1..];
     let fcs = {
         let fcs = src
-            .iter().take(fcs_tag_len).rev()
+            .iter()
+            .take(fcs_tag_len)
+            .rev()
             .fold(0u64, |acc, &byte| acc * 256u64 + (byte as u64));
         match fcs_tag_len {
             2 => fcs + 256,
@@ -66,19 +67,16 @@ fn process_frame_header(
             fse_data: None,
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
-        }
+        },
     ))
 }
-
 
 fn process_block(
     src: &[u8],
     block_idx: u64,
     last_state: ZstdDecodingState,
 ) -> Result<(ZstdDecodingState, BlockInfo)> {
-
-    let (mut last_state, block_info) =
-        process_block_header(src, block_idx, last_state)?;
+    let (mut last_state, block_info) = process_block_header(src, block_idx, last_state)?;
 
     let byte_offset = last_state.encoded_data.byte_idx as usize;
     //println!("offset after block header {} of block {}, block len {}", byte_offset, block_idx, block_info.block_len);
@@ -98,10 +96,12 @@ fn process_block(
             last_state.encoded_data.byte_idx += block_info.block_len as u64;
 
             let src = &src[byte_offset..];
-            assert!(src.len()>= block_info.block_len);
-            last_state.decoded_data.extend_from_slice(&src[..block_info.block_len]);
+            assert!(src.len() >= block_info.block_len);
+            last_state
+                .decoded_data
+                .extend_from_slice(&src[..block_info.block_len]);
             Ok(last_state)
-        },
+        }
         BlockType::RleBlock => {
             last_state.state.tag = ZstdTag::BlockContent;
             last_state.state.tag_next = ZstdTag::BlockHeader;
@@ -113,7 +113,7 @@ fn process_block(
             let new_size = last_state.decoded_data.len() + block_info.block_len;
             last_state.decoded_data.resize(new_size, src[0]);
             Ok(last_state)
-        },        
+        }
         _ => unreachable!("BlockType::ZstdCompressedBlock expected"),
     }?;
 
@@ -158,7 +158,7 @@ fn process_block_header(
             },
             encoded_data: EncodedDataCursor {
                 byte_idx: byte_offset + N_BLOCK_HEADER_BYTES as u64,
-                encoded_len: last_state.encoded_data.encoded_len,                
+                encoded_len: last_state.encoded_data.encoded_len,
             },
             literal_data: Vec::new(),
             bitstream_read_data: None,
@@ -178,7 +178,6 @@ fn process_block_zstd(
     block_size: usize,
     last_block: bool,
 ) -> Result<ZstdDecodingState> {
-
     let byte_offset = last_state.encoded_data.byte_idx as usize;
     let expected_end_offset = byte_offset + block_size;
 
@@ -189,9 +188,12 @@ fn process_block_zstd(
     // Literal body
     let byte_offset = last_state.encoded_data.byte_idx as usize;
     let literal_bytes = &src[byte_offset..];
-    
+
     // TODO: optimize this vector
-    let literal_data = literal_bytes[..regen_size].iter().map(|b|*b as u64).collect();
+    let literal_data = literal_bytes[..regen_size]
+        .iter()
+        .map(|b| *b as u64)
+        .collect();
 
     let last_state = ZstdDecodingState {
         state: ZstdState {
@@ -209,7 +211,7 @@ fn process_block_zstd(
         decoded_data: last_state.decoded_data,
         fse_data: None,
         repeated_offset: last_state.repeated_offset,
-        bitstream_read_data: None,  
+        bitstream_read_data: None,
     };
 
     // println!("offset after literal body {} of block {}", last_state.encoded_data.byte_idx, block_idx);
@@ -268,13 +270,8 @@ fn process_block_zstd(
     //     }
     // };
 
-    let last_state = process_sequences(
-        src, 
-        block_idx, 
-        expected_end_offset, 
-        last_state, 
-        last_block
-    )?;
+    let last_state =
+        process_sequences(src, block_idx, expected_end_offset, last_state, last_block)?;
 
     // let SequencesProcessingResult {
     //     offset,
@@ -305,9 +302,7 @@ fn process_block_zstd(
     );
 
     Ok(last_state)
-
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn process_sequences(
@@ -343,7 +338,10 @@ fn process_sequences(
         }
     };
 
-    assert!(src.len() >= num_sequence_header_bytes, "Compression mode byte must exist.");
+    assert!(
+        src.len() >= num_sequence_header_bytes,
+        "Compression mode byte must exist."
+    );
     let compression_mode_byte = src[num_sequence_header_bytes - 1];
     let mode_bits = value_bits_le(compression_mode_byte);
 
@@ -427,13 +425,9 @@ fn process_sequences(
 
     // Cooked Match Offset Table (CMOT)
     let src = &src[n_fse_bytes_llt..];
-    let (n_fse_bytes_cmot, table_cmot) = FseAuxiliaryTableData::reconstruct(
-        src,
-        block_idx,
-        FseTableKind::MOT,
-        offsets_mode < 2,
-    )
-    .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail.");
+    let (n_fse_bytes_cmot, table_cmot) =
+        FseAuxiliaryTableData::reconstruct(src, block_idx, FseTableKind::MOT, offsets_mode < 2)
+            .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail.");
     let cmot = table_cmot.parse_state_table();
     // Determine the accuracy log of CMOT
     let al_cmot = if offsets_mode > 0 {
@@ -517,7 +511,12 @@ fn process_sequences(
     let mut last_byte_idx: usize = 1;
     let mut current_byte_idx: usize = 1;
     let mut current_bit_idx: usize = 0;
-    println!("bit stream size {}, n_seq_bytes {}, offset {}", sequence_bitstream.len(), n_sequence_data_bytes, byte_offset);
+    println!(
+        "bit stream size {}, n_seq_bytes {}, offset {}",
+        sequence_bitstream.len(),
+        n_sequence_data_bytes,
+        byte_offset
+    );
 
     let mut padding_end_idx = 0;
     while sequence_bitstream[padding_end_idx] == 0 {
@@ -820,7 +819,7 @@ fn process_sequences(
             };
             decoded_bytes.extend_from_slice(matched_and_repeated_bytes.as_slice());
         }
-        current_literal_pos = new_literal_pos;        
+        current_literal_pos = new_literal_pos;
 
         // Update repeated offset
         if inst.0 > 3 {
@@ -882,7 +881,6 @@ fn process_sequences(
         literal_data: Vec::new(),
         repeated_offset,
     })
-
 }
 
 fn process_block_zstd_literals_header(
@@ -910,10 +908,11 @@ fn process_block_zstd_literals_header(
     let lh_bytes = &src[..n_bytes_header];
 
     // Bits for representing regenerated_size and compressed_size
-    let sizing_bits : Vec<u8> = lh_bytes.iter()
-    .flat_map(|b|value_bits_le(*b))
-    .skip(2 + n_bits_fmt)
-    .collect();
+    let sizing_bits: Vec<u8> = lh_bytes
+        .iter()
+        .flat_map(|b| value_bits_le(*b))
+        .skip(2 + n_bits_fmt)
+        .collect();
 
     let regen_size = le_bits_to_value(&sizing_bits[0..n_bits_regen]) as usize;
     let tag_next = match literals_block_type {
@@ -921,8 +920,8 @@ fn process_block_zstd_literals_header(
         _ => unreachable!("BlockType::* unexpected. Must be raw bytes for literals."),
     };
 
-    Ok(
-        (ZstdDecodingState {
+    Ok((
+        ZstdDecodingState {
             state: ZstdState {
                 tag: ZstdTag::ZstdBlockLiteralsHeader,
                 tag_next,
@@ -940,9 +939,8 @@ fn process_block_zstd_literals_header(
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
         },
-        regen_size)
-    )
-
+        regen_size,
+    ))
 }
 
 // Result for processing multiple blocks from compressed data
@@ -969,18 +967,12 @@ pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
     // let mut sequence_exec_info_arr: Vec<SequenceExecResult> = vec![];
 
     // // FrameHeaderDescriptor and FrameContentSize
-    let (_frame_content_size, mut last_state) = process_frame_header(
-        src,
-        ZstdDecodingState::init(src.len()),
-    )?;
+    let (_frame_content_size, mut last_state) =
+        process_frame_header(src, ZstdDecodingState::init(src.len()))?;
     //println!("offset after frame header {} (fcs {})", last_state.encoded_data.byte_idx, frame_content_size);
     let mut block_idx: u64 = 1;
     loop {
-        let (block_state, block_info) = process_block(
-            src,
-            block_idx,
-            last_state,
-        )?;
+        let (block_state, block_info) = process_block(src, block_idx, last_state)?;
         let offset = block_state.encoded_data.byte_idx as usize;
         //log::debug!("processed block={:?}: offset={:?}", block_idx, offset);
         last_state = block_state;
