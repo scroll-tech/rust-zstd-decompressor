@@ -78,7 +78,7 @@ pub fn read_variable_bit_packing(src: &[u8], offset: u32, r: u64) -> Result<(u32
 /// returns the index at which the first smallest SPoT occurs.
 pub fn smaller_powers_of_two(sum: u64, n: u64) -> (usize, Vec<u64>) {
     assert!(sum != 0, "SPoTs sum cannot be 0");
-    assert!(sum & (sum - 1) == 0, "SPoTs sum is not a power of 2");
+    assert!(sum.is_power_of_two(), "SPoTs sum is not a power of 2");
 
     if n == 1 {
         return (0, vec![(sum as f64).log2() as u64]);
