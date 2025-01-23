@@ -4,8 +4,8 @@ pub use crate::types::FseTableKind;
 use crate::params::*;
 use crate::util::{read_variable_bit_packing, smaller_powers_of_two};
 use bitstream_io::{BitRead, BitReader, LittleEndian};
-use std::{collections::BTreeMap, io::Cursor};
 use itertools::Itertools;
+use std::{collections::BTreeMap, io::Cursor};
 
 pub trait Fse {
     /// Get the accuracy log of the FSE table.
@@ -21,7 +21,6 @@ pub trait Fse {
     /// Get the number of bits (nb) to read from bitstream in the FSE table for the given state.
     fn nb(&self, state: u64) -> u64;
 }
-
 
 pub struct RomPredefinedFse {
     pub table_kind: FseTableKind,
@@ -388,7 +387,7 @@ impl FseAuxiliaryTableData {
         }
 
         state_table
-    } 
+    }
 }
 
 #[cfg(test)]

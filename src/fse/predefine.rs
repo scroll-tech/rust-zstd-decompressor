@@ -227,7 +227,6 @@ impl Fse for FseTableKind {
     }
 }
 
-
 pub fn predefined_fse(table_kind: FseTableKind) -> Vec<RomPredefinedFse> {
     let table_size = table_kind.table_size();
     (0..table_size)
