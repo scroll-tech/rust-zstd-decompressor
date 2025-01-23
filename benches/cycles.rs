@@ -1,8 +1,10 @@
+use std::fs;
+
 use anyhow::{anyhow, Result};
 use openvm::platform::memory::MEM_SIZE;
 use openvm_sdk::{config::SdkVmConfig, Sdk, StdIn};
 use openvm_transpiler::elf::Elf;
-use std::fs;
+use vm_zstd::zstd_encode;
 
 #[allow(unused_variables, unused_doc_comments)]
 fn calc_cycle(zstd_input: &[u8]) -> Result<()> {
@@ -48,15 +50,6 @@ fn calc_cycle(zstd_input: &[u8]) -> Result<()> {
     Ok(())
 }
 
-use std::io::Write;
-use zstd_encoder::N_BLOCK_SIZE_TARGET;
-use zstd_encoder::{init_zstd_encoder as init_zstd_encoder_n, zstd};
-
-/// Zstd encoder configuration
-fn init_zstd_encoder(target_block_size: Option<u32>) -> zstd::stream::Encoder<'static, Vec<u8>> {
-    init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
-}
-
 fn main() {
     let mut batch_files = fs::read_dir("./data/test_batches")
         .unwrap()
@@ -74,18 +67,7 @@ fn main() {
         .collect::<Vec<Vec<u8>>>();
 
     for raw_input_bytes in batches.into_iter() {
-        let compressed = {
-            // compression level = 0 defaults to using level=3, which is zstd's default.
-            let mut encoder = init_zstd_encoder(None);
-
-            // set source length, which will be reflected in the frame header.
-            encoder
-                .set_pledged_src_size(Some(raw_input_bytes.len() as u64))
-                .unwrap();
-
-            encoder.write_all(&raw_input_bytes).unwrap();
-            encoder.finish().unwrap()
-        };
+        let compressed = zstd_encode(&raw_input_bytes);
 
         calc_cycle(&compressed).unwrap();
     }
