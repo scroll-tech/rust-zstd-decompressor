@@ -998,65 +998,6 @@ mod tests {
         init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
     }
 
-    // #[test]
-    // #[ignore]
-    // fn compression_ratio() -> Result<(), std::io::Error> {
-    //     use csv::WriterBuilder;
-
-    //     let get_compression_ratio = |data: &[u8]| -> Result<(u64, u64, H256), std::io::Error> {
-    //         let raw_len = data.len();
-    //         let compressed = {
-    //             // compression level = 0 defaults to using level=3, which is zstd's default.
-    //             let mut encoder = init_zstd_encoder(None);
-
-    //             // set source length, which will be reflected in the frame header.
-    //             encoder.set_pledged_src_size(Some(raw_len as u64))?;
-
-    //             encoder.write_all(data)?;
-    //             encoder.finish()?
-    //         };
-    //         let hash = keccak256(&compressed);
-    //         let compressed_len = compressed.len();
-    //         Ok((raw_len as u64, compressed_len as u64, hash.into()))
-    //     };
-
-    //     let mut batch_files = fs::read_dir("./data")?
-    //         .map(|entry| entry.map(|e| e.path()))
-    //         .collect::<Result<Vec<_>, std::io::Error>>()?;
-    //     batch_files.sort();
-
-    //     let batches = batch_files
-    //         .iter()
-    //         .map(fs::read_to_string)
-    //         .filter_map(|data| data.ok())
-    //         .map(|data| hex::decode(data.trim_end()).expect("Failed to decode hex data"))
-    //         .collect::<Vec<Vec<u8>>>();
-
-    //     let file = File::create("modified-ratio.csv")?;
-    //     let mut writer = WriterBuilder::new().from_writer(file);
-
-    //     // Write headers to CSV
-    //     writer.write_record(["ID", "Len(input)", "Compression Ratio"])?;
-
-    //     // Test and store results in CSV
-    //     for (i, batch) in batches.iter().enumerate() {
-    //         let (raw_len, compr_len, keccak_hash) = get_compression_ratio(batch)?;
-    //         println!(
-    //             "batch{:0>3}, raw_size={:6}, compr_size={:6}, compr_keccak_hash={:64x}",
-    //             i, raw_len, compr_len, keccak_hash
-    //         );
-
-    //         // Write input and result to CSV
-    //         let compr_ratio = raw_len as f64 / compr_len as f64;
-    //         writer.write_record(&[i.to_string(), raw_len.to_string(), compr_ratio.to_string()])?;
-    //     }
-
-    //     // Flush the CSV writer
-    //     writer.flush()?;
-
-    //     Ok(())
-    // }
-
     #[test]
     fn test_zstd_witness_processing_batch_data() -> Result<(), std::io::Error> {
         use super::*;
