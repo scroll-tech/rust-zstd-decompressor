@@ -7,6 +7,7 @@ pub(crate) mod util;
 mod decoding;
 pub use decoding::process;
 
+#[cfg(feature = "zstd")]
 pub fn zstd_encode(raw_input_bytes: &[u8]) -> Vec<u8> {
     use std::io::Write;
     use zstd_encoder::init_zstd_encoder as init_zstd_encoder_n;
