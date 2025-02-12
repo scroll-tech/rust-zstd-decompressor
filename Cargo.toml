@@ -30,3 +30,4 @@ zstd = ["dep:zstd-encoder"]
 [[bench]]
 harness = false
 name = "cycles"
+required-features = ["zstd"]

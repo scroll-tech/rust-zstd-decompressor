@@ -683,11 +683,12 @@ fn process_sequences(
         // a separate row needs to be added for each of such byte to ensure continuity of the value
         // accumulators. These compensating rows have is_nil=true. At most, two bytes can be
         // entirely covered by a bitstream read operation.
-        let multi_byte_boundaries: [usize; 2] = [15, 23];
+        let multi_byte_boundaries: [usize; 3] = [15, 23, 31];
         let mut skipped_bits = 0usize;
 
         for boundary in multi_byte_boundaries {
             if to_bit_idx >= boundary {
+                // TODO: increase 8 times, can be optimized
                 // Skip over covered bytes for byte and bit index
                 for _ in 0..N_BITS_PER_BYTE {
                     (current_byte_idx, current_bit_idx) =
