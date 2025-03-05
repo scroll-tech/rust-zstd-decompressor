@@ -703,6 +703,7 @@ fn process_sequences(
                 match to_bit_idx {
                     15 => 8,
                     16..=23 => 16,
+                    24..=31 => 24,
                     v => unreachable!(
                         "unexpected bit_index_end={:?} in (table={:?}, update_f?={:?}) (bit_index_start={:?}, bitstring_len={:?})",
                         v, table_kind, (current_decoding_state >= 3), from_bit_idx, to_bit_idx - from_bit_idx + 1,
@@ -999,40 +1000,66 @@ mod tests {
         init_zstd_encoder_n(target_block_size.unwrap_or(N_BLOCK_SIZE_TARGET))
     }
 
-    #[test]
-    fn test_zstd_witness_processing_batch_data() -> Result<(), std::io::Error> {
+    fn test_processing(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
         use super::*;
+        let compressed = {
+            // compression level = 0 defaults to using level=3, which is zstd's default.
+            let mut encoder = init_zstd_encoder(None);
 
+            // set source length, which will be reflected in the frame header.
+            encoder.window_log(24)?;
+            encoder.set_pledged_src_size(Some(data.len() as u64))?;
+
+            encoder.write_all(data)?;
+            encoder.finish()?
+        };
+
+        let state = process(&compressed).unwrap();
+        Ok(state.decoded_data)
+
+    }
+
+    fn read_sample() -> Result<impl Iterator<Item = Vec<u8>>, std::io::Error> {
         let mut batch_files = fs::read_dir("./data/test_batches")?
             .map(|entry| entry.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?;
         batch_files.sort();
-        let batches = batch_files
-            .iter()
+        Ok(batch_files
+            .into_iter()
             .map(fs::read_to_string)
             .filter_map(|data| data.ok())
-            .map(|data| hex::decode(data.trim_end()).expect("Failed to decode hex data"))
-            .collect::<Vec<Vec<u8>>>();
+            .map(|data| hex::decode(data.trim_end()).expect("Failed to decode hex data")))
+    }
 
-        for raw_input_bytes in batches.into_iter() {
-            let compressed = {
-                // compression level = 0 defaults to using level=3, which is zstd's default.
-                let mut encoder = init_zstd_encoder(None);
-
-                // set source length, which will be reflected in the frame header.
-                encoder.set_pledged_src_size(Some(raw_input_bytes.len() as u64))?;
-
-                encoder.write_all(&raw_input_bytes)?;
-                encoder.finish()?
-            };
-
-            let state = process(&compressed).unwrap();
-
-            let decoded_bytes = state.decoded_data;
+    #[test]
+    fn test_zstd_witness_processing_batch_data() -> Result<(), std::io::Error> {
+        for raw_input_bytes in read_sample()? {
+            let decoded_bytes = test_processing(&raw_input_bytes)?;
 
             assert!(raw_input_bytes == decoded_bytes);
         }
 
         Ok(())
     }
+
+    #[test]
+    fn test_zstd_witness_processing_rle_data() -> Result<(), std::io::Error> {
+        for mut raw_input_bytes in read_sample()? {
+            // construct rle block and long-ref
+            if raw_input_bytes.len() < 128*1024 {
+                let cur = raw_input_bytes.clone();
+                // construct an rle
+                raw_input_bytes.resize(256*1024, 42u8);
+                // then we can have a long-distance ref
+                raw_input_bytes.extend(cur);
+            }
+
+            let decoded_bytes = test_processing(&raw_input_bytes)?;
+
+            assert!(raw_input_bytes == decoded_bytes);
+        }
+
+        Ok(())
+    }
+
 }
