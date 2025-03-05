@@ -214,86 +214,8 @@ fn process_block_zstd(
         bitstream_read_data: None,
     };
 
-    // println!("offset after literal body {} of block {}", last_state.encoded_data.byte_idx, block_idx);
-    // let LiteralsBlockResult {
-    //     offset: byte_offset,
-    //     witness_rows: rows,
-    //     literals,
-    // } = {
-    //     let last_row = rows.last().cloned().unwrap();
-    //     let multiplier =
-    //         (0..last_row.state.tag_len).fold(Value::known(F::one()), |acc, _| acc * randomness);
-    //     let value_rlc = last_row.encoded_data.value_rlc * multiplier + last_row.state.tag_rlc;
-    //     let tag = ZstdTag::ZstdBlockLiteralsRawBytes;
-    //     let tag_next = ZstdTag::ZstdBlockSequenceHeader;
-    //     let literals = src[byte_offset..(byte_offset + regen_size)].to_vec();
-    //     let tag_rlc_iter = literals.iter().scan(Value::known(F::zero()), |acc, &byte| {
-    //         *acc = *acc * randomness + Value::known(F::from(byte as u64));
-    //         Some(*acc)
-    //     });
-    //     let tag_rlc = tag_rlc_iter.clone().last().expect("Literals must exist.");
-
-    //     LiteralsBlockResult {
-    //         offset: byte_offset + regen_size,
-    //         witness_rows: literals
-    //             .iter()
-    //             .zip(tag_rlc_iter)
-    //             .enumerate()
-    //             .map(|(i, (&value_byte, tag_rlc_acc))| ZstdWitnessRow {
-    //                 state: ZstdState {
-    //                     tag,
-    //                     tag_next,
-    //                     block_idx,
-    //                     max_tag_len: tag.max_len(),
-    //                     tag_len: regen_size as u64,
-    //                     tag_idx: (i + 1) as u64,
-    //                     is_tag_change: i == 0,
-    //                     tag_rlc,
-    //                     tag_rlc_acc,
-    //                 },
-    //                 encoded_data: EncodedData {
-    //                     byte_idx: (byte_offset + i + 1) as u64,
-    //                     encoded_len: last_row.encoded_data.encoded_len,
-    //                     value_byte,
-    //                     value_rlc,
-    //                     reverse: false,
-    //                     ..Default::default()
-    //                 },
-    //                 decoded_data: DecodedData {
-    //                     decoded_len: last_row.decoded_data.decoded_len,
-    //                 },
-    //                 bitstream_read_data: BitstreamReadRow::default(),
-    //                 fse_data: FseDecodingRow::default(),
-    //             })
-    //             .collect::<Vec<_>>(),
-    //         literals: literals.iter().map(|b| *b as u64).collect::<Vec<u64>>(),
-    //     }
-    // };
-
     let last_state =
         process_sequences(src, block_idx, expected_end_offset, last_state, last_block)?;
-
-    // let SequencesProcessingResult {
-    //     offset,
-    //     witness_rows: rows,
-    //     fse_aux_tables,
-    //     address_table_rows,
-    //     original_bytes,
-    //     sequence_info,
-    //     sequence_exec,
-    //     repeated_offset,
-    // } = process_sequences::<F>(
-    //     src,
-    //     decoded_bytes,
-    //     block_idx,
-    //     byte_offset,
-    //     expected_end_offset,
-    //     literals.clone(),
-    //     last_row,
-    //     last_block,
-    //     randomness,
-    //     repeated_offset,
-    // );
 
     // sanity check:
     assert_eq!(
@@ -939,29 +861,8 @@ fn process_block_zstd_literals_header(
     ))
 }
 
-// Result for processing multiple blocks from compressed data
-// #[derive(Debug, Clone)]
-// pub struct MultiBlockProcessResult<F> {
-//     pub witness_rows: Vec<ZstdWitnessRow<F>>,
-//     pub literal_bytes: Vec<Vec<u64>>, // literals
-//     pub fse_aux_tables: Vec<FseAuxiliaryTableData>,
-//     pub block_info_arr: Vec<BlockInfo>,
-//     pub sequence_info_arr: Vec<SequenceInfo>,
-//     pub address_table_rows: Vec<Vec<AddressTableRow>>,
-//     pub sequence_exec_results: Vec<SequenceExecResult>,
-// }
-
 /// Process a slice of bytes into decompression circuit witness rows
 pub fn process(src: &[u8]) -> Result<ZstdDecodingState> {
-    // let mut witness_rows = vec![];
-    // let mut decoded_bytes: Vec<u8> = vec![];
-    // let mut literals: Vec<Vec<u64>> = vec![];
-    // let mut fse_aux_tables: Vec<FseAuxiliaryTableData> = vec![];
-    // let mut block_info_arr: Vec<BlockInfo> = vec![];
-    // let mut sequence_info_arr: Vec<SequenceInfo> = vec![];
-    // let mut address_table_arr: Vec<Vec<AddressTableRow>> = vec![];
-    // let mut sequence_exec_info_arr: Vec<SequenceExecResult> = vec![];
-
     // // FrameHeaderDescriptor and FrameContentSize
     let (_frame_content_size, mut last_state) =
         process_frame_header(src, ZstdDecodingState::init(src.len()))?;
@@ -1016,7 +917,6 @@ mod tests {
 
         let state = process(&compressed).unwrap();
         Ok(state.decoded_data)
-
     }
 
     fn read_sample() -> Result<impl Iterator<Item = Vec<u8>>, std::io::Error> {
@@ -1046,10 +946,10 @@ mod tests {
     fn test_zstd_witness_processing_rle_data() -> Result<(), std::io::Error> {
         for mut raw_input_bytes in read_sample()? {
             // construct rle block and long-ref
-            if raw_input_bytes.len() < 128*1024 {
+            if raw_input_bytes.len() < 128 * 1024 {
                 let cur = raw_input_bytes.clone();
                 // construct an rle
-                raw_input_bytes.resize(256*1024, 42u8);
+                raw_input_bytes.resize(256 * 1024, 42u8);
                 // then we can have a long-distance ref
                 raw_input_bytes.extend(cur);
             }
@@ -1061,5 +961,4 @@ mod tests {
 
         Ok(())
     }
-
 }
