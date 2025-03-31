@@ -359,15 +359,11 @@ fn process_sequences(
 
     let llt = table_llt.parse_state_table();
     // Determine the accuracy log of LLT
-    let al_llt = if literal_lengths_mode > 0 {
-        table_llt.accuracy_log
-    } else {
-        6
-    };
+    let al_llt = table_llt.accuracy_log;
 
     // Cooked Match Offset Table (CMOT)
     let src = &src[n_fse_bytes_llt..];
-    let (n_fse_bytes_cmot, table_cmot) = match literal_lengths_mode {
+    let (n_fse_bytes_cmot, table_cmot) = match offsets_mode {
         0 | 2 => {
             FseAuxiliaryTableData::reconstruct(src, block_idx, FseTableKind::MOT, offsets_mode == 0)
                 .expect(
@@ -387,15 +383,11 @@ fn process_sequences(
 
     let cmot = table_cmot.parse_state_table();
     // Determine the accuracy log of CMOT
-    let al_cmot = if offsets_mode > 0 {
-        table_cmot.accuracy_log
-    } else {
-        5
-    };
+    let al_cmot = table_cmot.accuracy_log;
 
     // Match Length Table (MLT)
     let src = &src[n_fse_bytes_cmot..];
-    let (n_fse_bytes_mlt, table_mlt) = match literal_lengths_mode {
+    let (n_fse_bytes_mlt, table_mlt) = match match_lengths_mode {
         0 | 2 => FseAuxiliaryTableData::reconstruct(
             src,
             block_idx,
@@ -416,11 +408,7 @@ fn process_sequences(
 
     let mlt = table_mlt.parse_state_table();
     // Determine the accuracy log of MLT
-    let al_mlt = if match_lengths_mode > 0 {
-        table_mlt.accuracy_log
-    } else {
-        6
-    };
+    let al_mlt = table_mlt.accuracy_log;
 
     let last_tag_len = if offsets_mode + match_lengths_mode < 1 {
         n_fse_bytes_llt
