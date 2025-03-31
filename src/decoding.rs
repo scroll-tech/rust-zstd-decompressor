@@ -363,7 +363,7 @@ fn process_sequences(
             src,
             block_idx,
             FseTableKind::MOT,
-            literal_lengths_mode == 0,
+            offsets_mode == 0,
         )
         .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
@@ -387,7 +387,7 @@ fn process_sequences(
             src,
             block_idx,
             FseTableKind::MLT,
-            literal_lengths_mode == 0,
+            match_lengths_mode == 0,
         )
         .expect("Reconstructing FSE-packed Match Length (ML) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
