@@ -342,7 +342,8 @@ fn process_sequences(
             literal_lengths_mode == 0,
         )
         .expect("Reconstructing FSE-packed Literl Length (LL) table should not fail."),
-        1 => panic!(""),
+        1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
+            .expect("Reconstructing RLE Literl Length (LL) table should not fail."),
         3 => (0, last_state.last_fse_table[0].clone().expect("")),
         _ => unreachable!(""),
     };
@@ -357,9 +358,20 @@ fn process_sequences(
 
     // Cooked Match Offset Table (CMOT)
     let src = &src[n_fse_bytes_llt..];
-    let (n_fse_bytes_cmot, table_cmot) =
-        FseAuxiliaryTableData::reconstruct(src, block_idx, FseTableKind::MOT, offsets_mode < 2)
-            .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail.");
+    let (n_fse_bytes_cmot, table_cmot) = match literal_lengths_mode {
+        0 | 2 => FseAuxiliaryTableData::reconstruct(
+            src,
+            block_idx,
+            FseTableKind::MOT,
+            literal_lengths_mode == 0,
+        )
+        .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail."),
+        1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
+            .expect("Reconstructing RLE Cooked Match Offset (CMO) table should not fail."),
+        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        _ => unreachable!(""),
+    };
+
     let cmot = table_cmot.parse_state_table();
     // Determine the accuracy log of CMOT
     let al_cmot = if offsets_mode > 0 {
@@ -370,13 +382,20 @@ fn process_sequences(
 
     // Match Length Table (MLT)
     let src = &src[n_fse_bytes_cmot..];
-    let (n_fse_bytes_mlt, table_mlt) = FseAuxiliaryTableData::reconstruct(
-        src,
-        block_idx,
-        FseTableKind::MLT,
-        match_lengths_mode < 2,
-    )
-    .expect("Reconstructing FSE-packed Match Length (ML) table should not fail.");
+    let (n_fse_bytes_mlt, table_mlt) = match literal_lengths_mode {
+        0 | 2 => FseAuxiliaryTableData::reconstruct(
+            src,
+            block_idx,
+            FseTableKind::MLT,
+            literal_lengths_mode == 0,
+        )
+        .expect("Reconstructing FSE-packed Match Length (ML) table should not fail."),
+        1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
+            .expect("Reconstructing RLE Match Length (ML) table should not fail."),
+        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        _ => unreachable!(""),
+    };
+
     let mlt = table_mlt.parse_state_table();
     // Determine the accuracy log of MLT
     let al_mlt = if match_lengths_mode > 0 {
@@ -413,8 +432,10 @@ fn process_sequences(
         fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
-        last_fse_table: if num_of_sequences == 0 {last_state.last_fse_table} else {
-            [Some(table_llt.clone()), Some(table_cmot.clone()), Some(table_mlt.clone())]
+        last_fse_table: if num_of_sequences == 0 {
+            last_state.last_fse_table
+        } else {
+            [Some(table_llt), Some(table_cmot), Some(table_mlt)]
         },
     };
     let byte_offset = last_state.encoded_data.byte_idx;
@@ -640,6 +661,7 @@ fn process_sequences(
                     15 => 8,
                     16..=23 => 16,
                     24..=31 => 24,
+                    32..=39 => 32,
                     v => unreachable!(
                         "unexpected bit_index_end={:?} in (table={:?}, update_f?={:?}) (bit_index_start={:?}, bitstring_len={:?})",
                         v, order_idx, (current_decoding_state >= 3), from_bit_idx, to_bit_idx - from_bit_idx + 1,

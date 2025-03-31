@@ -56,11 +56,21 @@ type FseStateMapping = BTreeMap<u64, (u64, u64, u64)>;
 type ReconstructedFse = (usize, FseAuxiliaryTableData);
 
 impl FseAuxiliaryTableData {
-
-    pub fn reconstruct_rle(
-        src: &[u8],
-        block_idx: u64,
-    ) -> std::io::Result<ReconstructedFse> {
+    pub fn reconstruct_rle(src: &[u8], block_idx: u64) -> std::io::Result<ReconstructedFse> {
+        let symbol = src[0] as u64;
+        let mut sym_to_states = BTreeMap::new();
+        sym_to_states.insert(
+            symbol,
+            vec![FseTableRow {
+                state: 0,
+                baseline: 0,
+                num_bits: 0,
+                symbol,
+                is_state_skipped: false,
+            }],
+        );
+        let mut normalised_probs = BTreeMap::new();
+        normalised_probs.insert(symbol, 1);
 
         Ok((
             1,
@@ -70,12 +80,10 @@ impl FseAuxiliaryTableData {
                 rle_symbol: Some(src[0]),
                 table_size: 1,
                 accuracy_log: 0,
-                normalised_probs: Default::default(),
-                sym_to_states: Default::default(),
-                //sym_to_sorted_states,
+                normalised_probs,
+                sym_to_states,
             },
         ))
-
     }
 
     /// While we reconstruct an FSE table from a bitstream, we do not know before reconstruction
@@ -383,11 +391,15 @@ mod tests {
 
         // TODO: assert equality for the entire table.
         // for now only comparing state/baseline/nb for S1, i.e. weight == 1.
-        let sorted_states = 
-            table.sym_to_states.get(&1).unwrap()
-            .iter().filter(|st|!st.is_state_skipped)
-            .sorted_by_key(|s|s.state)
-            .cloned().collect::<Vec<_>>();
+        let sorted_states = table
+            .sym_to_states
+            .get(&1)
+            .unwrap()
+            .iter()
+            .filter(|st| !st.is_state_skipped)
+            .sorted_by_key(|s| s.state)
+            .cloned()
+            .collect::<Vec<_>>();
 
         assert_eq!(n_bytes, 4);
         assert_eq!(
