@@ -344,7 +344,7 @@ fn process_sequences(
         .expect("Reconstructing FSE-packed Literl Length (LL) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Literl Length (LL) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Literl Length (LL) table should be existed")),
         _ => unreachable!(""),
     };
 
@@ -368,7 +368,7 @@ fn process_sequences(
         .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Cooked Match Offset (CMO) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Cooked Match Offset (CMO) table should be existed")),
         _ => unreachable!(""),
     };
 
@@ -392,7 +392,7 @@ fn process_sequences(
         .expect("Reconstructing FSE-packed Match Length (ML) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Match Length (ML) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Match Length (ML) table should be existed")),
         _ => unreachable!(""),
     };
 
@@ -661,7 +661,6 @@ fn process_sequences(
                     15 => 8,
                     16..=23 => 16,
                     24..=31 => 24,
-                    32..=39 => 32,
                     v => unreachable!(
                         "unexpected bit_index_end={:?} in (table={:?}, update_f?={:?}) (bit_index_start={:?}, bitstring_len={:?})",
                         v, order_idx, (current_decoding_state >= 3), from_bit_idx, to_bit_idx - from_bit_idx + 1,
