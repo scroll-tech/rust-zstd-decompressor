@@ -482,6 +482,8 @@ pub struct ZstdDecodingState {
     pub literal_data: Vec<u64>,
     /// the repeated offset for sequence
     pub repeated_offset: [usize; 3],
+    /// the cached fse table for repeated mode
+    pub last_fse_table: [Option<FseAuxiliaryTableData>; 3],
 }
 
 impl ZstdDecodingState {
@@ -498,6 +500,7 @@ impl ZstdDecodingState {
             bitstream_read_data: None,
             literal_data: Vec::new(),
             repeated_offset: [1, 4, 8], // starting values, according to the spec
+            last_fse_table: Default::default(),
         }
     }
 }

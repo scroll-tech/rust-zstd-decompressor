@@ -67,6 +67,7 @@ fn process_frame_header(
             fse_data: None,
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
+            last_fse_table: last_state.last_fse_table,
         },
     ))
 }
@@ -165,6 +166,7 @@ fn process_block_header(
             decoded_data: last_state.decoded_data,
             fse_data: None,
             repeated_offset: last_state.repeated_offset,
+            last_fse_table: last_state.last_fse_table,
         },
         block_info,
     ))
@@ -211,6 +213,7 @@ fn process_block_zstd(
         decoded_data: last_state.decoded_data,
         fse_data: None,
         repeated_offset: last_state.repeated_offset,
+        last_fse_table: last_state.last_fse_table,
         bitstream_read_data: None,
     };
 
@@ -246,7 +249,7 @@ fn process_sequences(
     let byte0 = src[0];
     assert!(byte0 > 0u8, "Sequences can't be of 0 length");
 
-    let (_num_of_sequences, num_sequence_header_bytes) = if byte0 < 128 {
+    let (num_of_sequences, num_sequence_header_bytes) = if byte0 < 128 {
         (byte0 as u64, 2usize)
     } else {
         assert!(src.len() >= 2, "Next byte of sequence header must exist.");
@@ -318,6 +321,7 @@ fn process_sequences(
         fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
+        last_fse_table: last_state.last_fse_table,
     };
 
     /////////////////////////////////////////////////
@@ -330,13 +334,19 @@ fn process_sequences(
     let src = &src[num_sequence_header_bytes..];
 
     // Literal Length Table (LLT)
-    let (n_fse_bytes_llt, table_llt) = FseAuxiliaryTableData::reconstruct(
-        src,
-        block_idx,
-        FseTableKind::LLT,
-        literal_lengths_mode < 2,
-    )
-    .expect("Reconstructing FSE-packed Literl Length (LL) table should not fail.");
+    let (n_fse_bytes_llt, table_llt) = match literal_lengths_mode {
+        0 | 2 => FseAuxiliaryTableData::reconstruct(
+            src,
+            block_idx,
+            FseTableKind::LLT,
+            literal_lengths_mode == 0,
+        )
+        .expect("Reconstructing FSE-packed Literl Length (LL) table should not fail."),
+        1 => panic!(""),
+        3 => (0, last_state.last_fse_table[0].clone().expect("")),
+        _ => unreachable!(""),
+    };
+
     let llt = table_llt.parse_state_table();
     // Determine the accuracy log of LLT
     let al_llt = if literal_lengths_mode > 0 {
@@ -403,6 +413,9 @@ fn process_sequences(
         fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
+        last_fse_table: if num_of_sequences == 0 {last_state.last_fse_table} else {
+            [Some(table_llt.clone()), Some(table_cmot.clone()), Some(table_mlt.clone())]
+        },
     };
     let byte_offset = last_state.encoded_data.byte_idx;
 
@@ -460,6 +473,7 @@ fn process_sequences(
         fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
+        last_fse_table: last_state.last_fse_table,
     };
 
     // Exclude the leading zero section
@@ -506,7 +520,7 @@ fn process_sequences(
     let mut is_init = true;
     let mut nb = nb_switch[mode][order_idx];
     let bitstream_end_bit_idx = n_sequence_data_bytes * N_BITS_PER_BYTE;
-    let mut table_kind;
+    //let mut table_kind;
     let mut last_states: [u64; 3] = [0, 0, 0];
     let mut last_symbols: [u64; 3] = [0, 0, 0];
     let mut current_decoding_state;
@@ -528,17 +542,17 @@ fn process_sequences(
 
             current_decoding_state = (mode * 3 + order_idx) as u64;
 
-            table_kind = match new_decoded.0 {
-                SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
-                    table_cmot.table_kind as u64
-                }
-                SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
-                    table_mlt.table_kind as u64
-                }
-                SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
-                    table_llt.table_kind as u64
-                }
-            };
+            // table_kind = match new_decoded.0 {
+            //     SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
+            //         table_cmot.table_kind as u64
+            //     }
+            //     SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
+            //         table_mlt.table_kind as u64
+            //     }
+            //     SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
+            //         table_llt.table_kind as u64
+            //     }
+            // };
 
             // FSE state update step
             curr_baseline = state_baselines[order_idx];
@@ -575,17 +589,17 @@ fn process_sequences(
 
             current_decoding_state = (mode * 3 + order_idx) as u64;
 
-            table_kind = match new_decoded.0 {
-                SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
-                    table_cmot.table_kind as u64
-                }
-                SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
-                    table_mlt.table_kind as u64
-                }
-                SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
-                    table_llt.table_kind as u64
-                }
-            };
+            // table_kind = match new_decoded.0 {
+            //     SequenceDataTag::CookedMatchOffsetFse | SequenceDataTag::CookedMatchOffsetValue => {
+            //         table_cmot.table_kind as u64
+            //     }
+            //     SequenceDataTag::MatchLengthFse | SequenceDataTag::MatchLengthValue => {
+            //         table_mlt.table_kind as u64
+            //     }
+            //     SequenceDataTag::LiteralLengthFse | SequenceDataTag::LiteralLengthValue => {
+            //         table_llt.table_kind as u64
+            //     }
+            // };
 
             // Value decoding step
             curr_baseline = decoding_baselines[order_idx];
@@ -628,7 +642,7 @@ fn process_sequences(
                     24..=31 => 24,
                     v => unreachable!(
                         "unexpected bit_index_end={:?} in (table={:?}, update_f?={:?}) (bit_index_start={:?}, bitstring_len={:?})",
-                        v, table_kind, (current_decoding_state >= 3), from_bit_idx, to_bit_idx - from_bit_idx + 1,
+                        v, order_idx, (current_decoding_state >= 3), from_bit_idx, to_bit_idx - from_bit_idx + 1,
                     ),
                 };
             }
@@ -798,6 +812,7 @@ fn process_sequences(
         fse_data: None,
         literal_data: Vec::new(),
         repeated_offset,
+        last_fse_table: last_state.last_fse_table,
     })
 }
 
@@ -856,6 +871,7 @@ fn process_block_zstd_literals_header(
             fse_data: None,
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
+            last_fse_table: last_state.last_fse_table,
         },
         regen_size,
     ))
