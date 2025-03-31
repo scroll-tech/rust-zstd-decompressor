@@ -63,8 +63,6 @@ fn process_frame_header(
                 encoded_len: last_state.encoded_data.encoded_len,
             },
             decoded_data: last_state.decoded_data,
-            bitstream_read_data: None,
-            fse_data: None,
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
             last_fse_table: last_state.last_fse_table,
@@ -162,9 +160,7 @@ fn process_block_header(
                 encoded_len: last_state.encoded_data.encoded_len,
             },
             literal_data: Vec::new(),
-            bitstream_read_data: None,
             decoded_data: last_state.decoded_data,
-            fse_data: None,
             repeated_offset: last_state.repeated_offset,
             last_fse_table: last_state.last_fse_table,
         },
@@ -211,10 +207,8 @@ fn process_block_zstd(
         },
         literal_data,
         decoded_data: last_state.decoded_data,
-        fse_data: None,
         repeated_offset: last_state.repeated_offset,
         last_fse_table: last_state.last_fse_table,
-        bitstream_read_data: None,
     };
 
     let last_state =
@@ -263,6 +257,39 @@ fn process_sequences(
         }
     };
 
+    if num_of_sequences == 0 {
+        // this case is highly unpossible: we use raw literal so such a block would be
+        // definitely turned into a raw block
+        let mut literal_bytes = last_state
+            .literal_data
+            .into_iter()
+            .map(|v| v as u8)
+            .collect::<Vec<_>>();
+        let mut decoded_data = last_state.decoded_data;
+        decoded_data.append(&mut literal_bytes);
+        return Ok(ZstdDecodingState {
+            state: ZstdState {
+                tag: ZstdTag::ZstdBlockSequenceHeader,
+                tag_next: if last_block {
+                    ZstdTag::Null
+                } else {
+                    ZstdTag::BlockHeader
+                },
+                block_idx,
+                max_tag_len: ZstdTag::ZstdBlockSequenceHeader.max_len(),
+                tag_len: num_sequence_header_bytes as u64,
+            },
+            encoded_data: EncodedDataCursor {
+                byte_idx: byte_offset + num_sequence_header_bytes as u64,
+                encoded_len: last_state.encoded_data.encoded_len,
+            },
+            decoded_data,
+            literal_data: Vec::new(),
+            repeated_offset: last_state.repeated_offset,
+            last_fse_table: last_state.last_fse_table,
+        });
+    }
+
     assert!(
         src.len() >= num_sequence_header_bytes,
         "Compression mode byte must exist."
@@ -276,27 +303,6 @@ fn process_sequences(
     let reserved = mode_bits[0] + mode_bits[1] * 2;
 
     assert!(reserved == 0, "Reserved bits must be 0");
-
-    // Note: Only 2 modes of FSE encoding are accepted (instead of 4):
-    // 0 - Predefined.
-    // 2 - Variable bit packing.
-    assert!(
-        literal_lengths_mode == 2 || literal_lengths_mode == 0,
-        "Only FSE_Compressed_Mode or Predefined are allowed"
-    );
-    assert!(
-        offsets_mode == 2 || offsets_mode == 0,
-        "Only FSE_Compressed_Mode or Predefined are allowed"
-    );
-    assert!(
-        match_lengths_mode == 2 || match_lengths_mode == 0,
-        "Only FSE_Compressed_Mode or Predefined are allowed"
-    );
-    let _compression_mode = [
-        literal_lengths_mode > 0,
-        offsets_mode > 0,
-        match_lengths_mode > 0,
-    ];
 
     let is_all_predefined_fse = literal_lengths_mode + offsets_mode + match_lengths_mode < 1;
 
@@ -316,9 +322,7 @@ fn process_sequences(
             byte_idx: byte_offset + num_sequence_header_bytes as u64,
             encoded_len: last_state.encoded_data.encoded_len,
         },
-        bitstream_read_data: None,
         decoded_data: last_state.decoded_data,
-        fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
         last_fse_table: last_state.last_fse_table,
@@ -344,7 +348,12 @@ fn process_sequences(
         .expect("Reconstructing FSE-packed Literl Length (LL) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Literl Length (LL) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Literl Length (LL) table should be existed")),
+        3 => (
+            0,
+            last_state.last_fse_table[0]
+                .clone()
+                .expect("Repeatd Literl Length (LL) table should be existed"),
+        ),
         _ => unreachable!(""),
     };
 
@@ -359,16 +368,20 @@ fn process_sequences(
     // Cooked Match Offset Table (CMOT)
     let src = &src[n_fse_bytes_llt..];
     let (n_fse_bytes_cmot, table_cmot) = match literal_lengths_mode {
-        0 | 2 => FseAuxiliaryTableData::reconstruct(
-            src,
-            block_idx,
-            FseTableKind::MOT,
-            offsets_mode == 0,
-        )
-        .expect("Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail."),
+        0 | 2 => {
+            FseAuxiliaryTableData::reconstruct(src, block_idx, FseTableKind::MOT, offsets_mode == 0)
+                .expect(
+                    "Reconstructing FSE-packed Cooked Match Offset (CMO) table should not fail.",
+                )
+        }
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Cooked Match Offset (CMO) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Cooked Match Offset (CMO) table should be existed")),
+        3 => (
+            0,
+            last_state.last_fse_table[0]
+                .clone()
+                .expect("Repeatd Cooked Match Offset (CMO) table should be existed"),
+        ),
         _ => unreachable!(""),
     };
 
@@ -392,7 +405,12 @@ fn process_sequences(
         .expect("Reconstructing FSE-packed Match Length (ML) table should not fail."),
         1 => FseAuxiliaryTableData::reconstruct_rle(src, block_idx)
             .expect("Reconstructing RLE Match Length (ML) table should not fail."),
-        3 => (0, last_state.last_fse_table[0].clone().expect("Repeatd Match Length (ML) table should be existed")),
+        3 => (
+            0,
+            last_state.last_fse_table[0]
+                .clone()
+                .expect("Repeatd Match Length (ML) table should be existed"),
+        ),
         _ => unreachable!(""),
     };
 
@@ -427,9 +445,7 @@ fn process_sequences(
             byte_idx: byte_offset + (n_fse_bytes_llt + n_fse_bytes_cmot + n_fse_bytes_mlt) as u64,
             encoded_len: last_state.encoded_data.encoded_len,
         },
-        bitstream_read_data: None,
         decoded_data: last_state.decoded_data,
-        fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
         last_fse_table: if num_of_sequences == 0 {
@@ -489,9 +505,7 @@ fn process_sequences(
             byte_idx: byte_offset + n_sequence_data_bytes as u64,
             encoded_len: last_state.encoded_data.encoded_len,
         },
-        bitstream_read_data: None,
         decoded_data: last_state.decoded_data,
-        fse_data: None,
         literal_data: last_state.literal_data,
         repeated_offset: last_state.repeated_offset,
         last_fse_table: last_state.last_fse_table,
@@ -828,9 +842,7 @@ fn process_sequences(
             byte_idx: byte_offset + n_sequence_data_bytes as u64,
             encoded_len: last_state.encoded_data.encoded_len,
         },
-        bitstream_read_data: None,
         decoded_data: decoded_bytes,
-        fse_data: None,
         literal_data: Vec::new(),
         repeated_offset,
         last_fse_table: last_state.last_fse_table,
@@ -888,8 +900,6 @@ fn process_block_zstd_literals_header(
                 encoded_len: last_state.encoded_data.encoded_len,
             },
             decoded_data: last_state.decoded_data,
-            bitstream_read_data: None,
-            fse_data: None,
             literal_data: Vec::new(),
             repeated_offset: last_state.repeated_offset,
             last_fse_table: last_state.last_fse_table,
