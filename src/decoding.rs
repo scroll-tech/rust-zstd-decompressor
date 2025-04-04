@@ -374,7 +374,7 @@ fn process_sequences(
             .expect("Reconstructing RLE Cooked Match Offset (CMO) table should not fail."),
         3 => (
             0,
-            last_state.last_fse_table[0]
+            last_state.last_fse_table[1]
                 .clone()
                 .expect("Repeatd Cooked Match Offset (CMO) table should be existed"),
         ),
@@ -399,7 +399,7 @@ fn process_sequences(
             .expect("Reconstructing RLE Match Length (ML) table should not fail."),
         3 => (
             0,
-            last_state.last_fse_table[0]
+            last_state.last_fse_table[2]
                 .clone()
                 .expect("Repeatd Match Length (ML) table should be existed"),
         ),
@@ -944,6 +944,8 @@ mod tests {
 
             // set source length, which will be reflected in the frame header.
             encoder.window_log(24)?;
+            // reduce compressed block size, so we have more chance to test fse repeated mode header
+            encoder.set_target_cblock_size(Some(16384))?;
             encoder.set_pledged_src_size(Some(data.len() as u64))?;
 
             encoder.write_all(data)?;
