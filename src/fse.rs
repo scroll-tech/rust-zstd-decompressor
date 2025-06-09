@@ -17,8 +17,6 @@ pub struct FseTableRow {
     pub num_bits: u64,
     /// The symbol emitted by the FSE table at this state.
     pub symbol: u64,
-    /// During FSE table decoding, keep track of the number of symbol emitted
-    pub num_emitted: u64,
     /// A boolean marker to indicate that as per the state transition rules of FSE codes, this
     /// state was reached for this symbol, however it was already pre-allocated to a prior symbol,
     /// this can happen in case we have symbols with prob=-1.
@@ -32,8 +30,8 @@ pub struct FseAuxiliaryTableData {
     pub block_idx: u64,
     /// Indicates whether the table is pre-defined.
     pub is_predefined: bool,
-    /// The FSE table kind, variants are: LLT=1, MOT=2, MLT=3.
-    pub table_kind: FseTableKind,
+    /// In RLE mode, record the rle symbol.
+    pub rle_symbol: Option<u8>,
     /// The FSE table's size, i.e. 1 << AL (accuracy log).
     pub table_size: u64,
     /// The accuracy log
@@ -46,8 +44,8 @@ pub struct FseAuxiliaryTableData {
     ///
     /// For each symbol, the states as per the state transition rule.
     pub sym_to_states: BTreeMap<u64, Vec<FseTableRow>>,
-    /// Similar map, but where the states for each symbol are in increasing order (sorted).
-    pub sym_to_sorted_states: BTreeMap<u64, Vec<FseTableRow>>,
+    // Similar map, but where the states for each symbol are in increasing order (sorted).
+    // pub sym_to_sorted_states: BTreeMap<u64, Vec<FseTableRow>>,
 }
 
 /// Another form of Fse table that has state as key instead of the FseSymbol.
@@ -58,6 +56,36 @@ type FseStateMapping = BTreeMap<u64, (u64, u64, u64)>;
 type ReconstructedFse = (usize, FseAuxiliaryTableData);
 
 impl FseAuxiliaryTableData {
+    pub fn reconstruct_rle(src: &[u8], block_idx: u64) -> std::io::Result<ReconstructedFse> {
+        let symbol = src[0] as u64;
+        let mut sym_to_states = BTreeMap::new();
+        sym_to_states.insert(
+            symbol,
+            vec![FseTableRow {
+                state: 0,
+                baseline: 0,
+                num_bits: 0,
+                symbol,
+                is_state_skipped: false,
+            }],
+        );
+        let mut normalised_probs = BTreeMap::new();
+        normalised_probs.insert(symbol, 1);
+
+        Ok((
+            1,
+            Self {
+                block_idx,
+                is_predefined: false,
+                rle_symbol: Some(src[0]),
+                table_size: 1,
+                accuracy_log: 0,
+                normalised_probs,
+                sym_to_states,
+            },
+        ))
+    }
+
     /// While we reconstruct an FSE table from a bitstream, we do not know before reconstruction
     /// how many exact bytes we would finally be reading.
     ///
@@ -73,8 +101,8 @@ impl FseAuxiliaryTableData {
         is_predefined: bool,
     ) -> std::io::Result<ReconstructedFse> {
         // construct little-endian bit-reader.
-        let data = src.to_vec();
-        let mut reader = BitReader::endian(Cursor::new(&data), LittleEndian);
+        // let data = src.to_vec();
+        let mut reader = BitReader::endian(Cursor::new(src), LittleEndian);
 
         ////////////////////////////////////////////////////////////////////////////////////////
         //////////////////////////// Parse Normalised Probabilities ////////////////////////////
@@ -124,7 +152,7 @@ impl FseAuxiliaryTableData {
                 // number of bits and value read from the variable bit-packed data.
                 // And update the total number of bits read so far.
                 let (n_bits_read, _value_read, value_decoded) =
-                    read_variable_bit_packing(&data, offset, R + 1)?;
+                    read_variable_bit_packing(src, offset, R + 1)?;
                 reader.skip(n_bits_read)?;
                 offset += n_bits_read;
 
@@ -207,20 +235,19 @@ impl FseAuxiliaryTableData {
         ////////////////////////////////////////////////////////////////////////////////////////
         ///////////////////////////// Allocate States to Symbols ///////////////////////////////
         ////////////////////////////////////////////////////////////////////////////////////////
-        let (sym_to_states, sym_to_sorted_states) =
-            Self::transform_normalised_probs(&normalised_probs, accuracy_log);
+        let sym_to_states = Self::transform_normalised_probs(&normalised_probs, accuracy_log);
 
         Ok((
             t,
             Self {
                 block_idx,
                 is_predefined,
-                table_kind,
+                rle_symbol: None,
                 table_size,
                 accuracy_log: accuracy_log as u64,
                 normalised_probs,
                 sym_to_states,
-                sym_to_sorted_states,
+                //sym_to_sorted_states,
             },
         ))
     }
@@ -229,15 +256,11 @@ impl FseAuxiliaryTableData {
     fn transform_normalised_probs(
         normalised_probs: &BTreeMap<u64, i32>,
         accuracy_log: u8,
-    ) -> (
-        BTreeMap<u64, Vec<FseTableRow>>,
-        BTreeMap<u64, Vec<FseTableRow>>,
-    ) {
+    ) -> BTreeMap<u64, Vec<FseTableRow>> {
         // TODO: still need optimizations
         let table_size = 1 << accuracy_log;
 
         let mut sym_to_states = BTreeMap::new();
-        let mut sym_to_sorted_states = BTreeMap::new();
         let mut state = 0;
         let mut retreating_state = table_size - 1;
         let mut allocated_states = BTreeMap::<u64, bool>::new();
@@ -254,10 +277,8 @@ impl FseAuxiliaryTableData {
                 baseline: 0,
                 symbol,
                 is_state_skipped: false,
-                num_emitted: 0,
             };
             sym_to_states.insert(symbol, vec![fse_table_row.clone()]);
-            sym_to_sorted_states.insert(symbol, vec![fse_table_row]);
             retreating_state -= 1;
         }
 
@@ -321,31 +342,14 @@ impl FseAuxiliaryTableData {
                             num_bits: nb,
                             baseline,
                             symbol,
-                            num_emitted: 0,
                             is_state_skipped,
                         }
                     })
                     .collect(),
             );
-            sym_to_sorted_states.insert(
-                symbol,
-                sorted_states
-                    .iter()
-                    .zip(nbs.iter())
-                    .zip(baselines.iter())
-                    .map(|((&s, &nb), &baseline)| FseTableRow {
-                        state: s,
-                        num_bits: nb,
-                        baseline,
-                        symbol,
-                        num_emitted: 0,
-                        is_state_skipped: false,
-                    })
-                    .collect(),
-            );
         }
 
-        (sym_to_states, sym_to_sorted_states)
+        sym_to_states
     }
 
     /// Convert an FseAuxiliaryTableData into a state-mapped representation.
@@ -387,10 +391,19 @@ mod tests {
 
         // TODO: assert equality for the entire table.
         // for now only comparing state/baseline/nb for S1, i.e. weight == 1.
+        let sorted_states = table
+            .sym_to_states
+            .get(&1)
+            .unwrap()
+            .iter()
+            .filter(|st| !st.is_state_skipped)
+            .sorted_by_key(|s| s.state)
+            .cloned()
+            .collect::<Vec<_>>();
 
         assert_eq!(n_bytes, 4);
         assert_eq!(
-            table.sym_to_sorted_states.get(&1).cloned().unwrap(),
+            sorted_states,
             [
                 (0x03, 0x10, 3),
                 (0x0c, 0x18, 3),
@@ -405,7 +418,6 @@ mod tests {
                 symbol: 1,
                 baseline,
                 num_bits,
-                num_emitted: 0,
                 is_state_skipped: false,
             })
             .collect::<Vec<FseTableRow>>(),

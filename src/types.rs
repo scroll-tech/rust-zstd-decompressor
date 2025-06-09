@@ -472,16 +472,14 @@ pub struct ZstdDecodingState {
     pub state: ZstdState,
     /// Data cursor on compressed data
     pub encoded_data: EncodedDataCursor,
-    /// Bitstream reader cursor
-    pub bitstream_read_data: Option<BitstreamReadCursor>,
     /// decompressed data has been decoded
     pub decoded_data: Vec<u8>,
-    /// Fse decoding state transition data
-    pub fse_data: Option<FseDecodingState>,
     /// literal dicts
     pub literal_data: Vec<u64>,
     /// the repeated offset for sequence
     pub repeated_offset: [usize; 3],
+    /// the cached fse table for repeated mode
+    pub last_fse_table: [Option<FseAuxiliaryTableData>; 3],
 }
 
 impl ZstdDecodingState {
@@ -494,10 +492,9 @@ impl ZstdDecodingState {
                 ..Default::default()
             },
             decoded_data: Vec::new(),
-            fse_data: None,
-            bitstream_read_data: None,
             literal_data: Vec::new(),
             repeated_offset: [1, 4, 8], // starting values, according to the spec
+            last_fse_table: Default::default(),
         }
     }
 }
