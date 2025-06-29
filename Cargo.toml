@@ -15,14 +15,14 @@ strum = "0.25"
 strum_macros = "0.25"
 anyhow = "1"
 serde = { version = "1", default-features = false, features = ["derive"] }
-zstd-encoder = { package = "encoder", git = "https://github.com/scroll-tech/da-codec.git", branch = "test/prim_zstd", optional = true }
+zstd-encoder = { package = "encoder", git = "https://github.com/scroll-tech/da-codec.git", rev = "ad2db39", optional = true }
 
 [dev-dependencies]
 hex = "0.4"
 openvm = { git = "https://github.com/openvm-org/openvm.git", default-features = false, features = ["std"] }
 openvm-sdk = { git = "https://github.com/openvm-org/openvm.git", default-features = false}
 openvm-transpiler = { git = "https://github.com/openvm-org/openvm.git", default-features = false }
-zstd-encoder = { package = "encoder", git = "https://github.com/scroll-tech/da-codec.git", branch = "test/prim_zstd" }
+zstd-encoder = { package = "encoder", git = "https://github.com/scroll-tech/da-codec.git", rev = "ad2db39" }
 
 [features]
 zstd = ["dep:zstd-encoder"]
